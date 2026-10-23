@@ -109,7 +109,7 @@ export default function PasskeyVerificationPage() {
               <Key className="h-5 w-5 text-white" />
             </div>
             <div>
-              <CardTitle className="text-white text-base font-black uppercase tracking-tight">Passkey Verification</CardTitle>
+              <CardTitle role="heading" aria-level={1} className="text-white text-base font-black uppercase tracking-tight">Passkey Verification</CardTitle>
               <CardDescription className="text-stone-400 text-xs uppercase tracking-widest font-mono">
                 Step 3 — Final Check
               </CardDescription>

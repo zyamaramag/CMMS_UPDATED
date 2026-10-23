@@ -269,7 +269,7 @@ export default function MFAVerificationPage() {
               <Shield className="h-5 w-5 text-white" />
             </div>
             <div>
-              <CardTitle className="text-white text-base font-black uppercase tracking-tight">MFA Verification</CardTitle>
+              <CardTitle role="heading" aria-level={1} className="text-white text-base font-black uppercase tracking-tight">MFA Verification</CardTitle>
               <CardDescription className="text-stone-400 text-xs uppercase tracking-widest font-mono">
                 Step 2 — Identity Check
               </CardDescription>
@@ -294,14 +294,18 @@ export default function MFAVerificationPage() {
           {/* OTP Input */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-stone-800">Enter 6-Digit Code</label>
+              <label id="otp-label" className="text-sm font-medium text-stone-800">Enter 6-Digit Code</label>
               <span className="text-xs text-stone-600">Paste supported</span>
             </div>
             <div className="flex gap-2 justify-center">
               {otp.map((digit, index) => (
                 <Input
                   key={index}
-                  ref={(el) => (inputRefs.current[index] = el)}
+                  aria-labelledby="otp-label"
+                  aria-label={`Digit ${index + 1} of 6`}
+                  ref={(el) => {
+                    inputRefs.current[index] = el;
+                  }}
                   type="text"
                   inputMode="numeric"
                   pattern="\d*"

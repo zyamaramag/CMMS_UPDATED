@@ -16,7 +16,7 @@ export default function RequestApprovalReceipt({ request, isOpen, onClose }: Req
     window.print();
   };
 
-  const isApproved = request.status === 'approved';
+  const isApproved = request.status === 'approved' || request.status === 'issued';
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>

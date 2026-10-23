@@ -1,0 +1,11 @@
+{
+  "title": "HVL Construction Management System",
+  "description": "Streamline construction materials management with a role-based system for tracking inventory and transactions, enhancing efficiency for engineering teams.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

@@ -1,5 +1,6 @@
 import PageTransition from '../components/PageTransition';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 import { useData } from '../contexts/DataContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -14,6 +15,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableCaption,
 } from '../components/ui/table';
 import {
   Dialog,
@@ -25,13 +27,19 @@ import {
 } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { SystemUser } from '../data/mockData';
-import { Plus, Edit, Trash2, ShieldAlert, AlertCircle } from 'lucide-react';
+import { Plus, Edit, Trash2, ShieldAlert, AlertCircle, Search } from 'lucide-react';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { toast } from 'sonner';
+import { useAccessibility } from '../contexts/AccessibilityContext';
 
 export default function UsersPage() {
   const { user } = useAuth();
   const { users, addUser, updateUser, deleteUser } = useData();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { announce } = useAccessibility();
+  const [searchTerm, setSearchTerm] = useState(searchParams.get('q') ?? '');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -45,6 +53,52 @@ export default function UsersPage() {
   });
 
   const isAdmin = user?.role === 'admin';
+  const filteredUsers = users.filter(systemUser => {
+    const query = searchTerm.trim().toLowerCase();
+    return !query ||
+      systemUser.username.toLowerCase().includes(query) ||
+      systemUser.fullName.toLowerCase().includes(query) ||
+      systemUser.email.toLowerCase().includes(query) ||
+      systemUser.role.toLowerCase().includes(query) ||
+      systemUser.status.toLowerCase().includes(query);
+  });
+
+  useEffect(() => {
+    setSearchTerm(searchParams.get('q') ?? '');
+  }, [searchParams]);
+
+  useEffect(() => {
+    const voiceState = location.state as {
+      voiceOpenAddUser?: boolean;
+      voiceEditUserId?: string;
+    } | null;
+    if ((!voiceState?.voiceOpenAddUser && !voiceState?.voiceEditUserId) || !isAdmin) return;
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+    if (voiceState.voiceOpenAddUser) {
+      resetForm();
+      setIsAddDialogOpen(true);
+      announce('New user form opened. Review all account fields before creating the user.');
+      return;
+    }
+
+    if (voiceState.voiceEditUserId) {
+      const selected = users.find(systemUser => systemUser.id === voiceState.voiceEditUserId);
+      if (!selected) {
+        announce('The voice-selected user is no longer available.', 'assertive');
+        return;
+      }
+      setSelectedUser(selected);
+      setFormData({
+        username: selected.username,
+        email: selected.email,
+        fullName: selected.fullName,
+        role: selected.role,
+        password: '',
+      });
+      setIsEditDialogOpen(true);
+      announce(`Edit form opened for ${selected.fullName}. Review all fields before saving.`);
+    }
+  }, [announce, isAdmin, location.pathname, location.search, location.state, navigate, users]);
 
   if (!isAdmin) {
     return (
@@ -64,13 +118,21 @@ export default function UsersPage() {
   }
 
   const handleAdd = () => {
+    if (!formData.username.trim() || !formData.fullName.trim() || !formData.email.trim() || formData.password.length < 8) {
+      toast.error('Complete all fields and use a password with at least 8 characters');
+      return;
+    }
+    if (users.some(existing => existing.username.toLowerCase() === formData.username.trim().toLowerCase() || existing.email.toLowerCase() === formData.email.trim().toLowerCase())) {
+      toast.error('A user with that username or email already exists');
+      return;
+    }
     addUser({
-      username: formData.username,
-      email: formData.email,
-      fullName: formData.fullName,
+      username: formData.username.trim(),
+      email: formData.email.trim(),
+      fullName: formData.fullName.trim(),
       role: formData.role,
       status: 'active',
-      lastLogin: new Date().toISOString()
+      password: formData.password
     });
 
     toast.success('User created successfully');
@@ -107,7 +169,7 @@ export default function UsersPage() {
       username: '',
       email: '',
       fullName: '',
-      role: 'viewer',
+      role: 'staff',
       password: ''
     });
     setSelectedUser(null);
@@ -208,10 +270,79 @@ export default function UsersPage() {
         <CardHeader>
           <CardTitle>System Users</CardTitle>
           <CardDescription>Manage user accounts and permissions</CardDescription>
+          <div className="relative max-w-md pt-2">
+            <Search className="absolute left-3 top-5 h-4 w-4 text-stone-500" aria-hidden="true" />
+            <Label htmlFor="user-search" className="sr-only">Search system users</Label>
+            <Input
+              id="user-search"
+              value={searchTerm}
+              onChange={event => setSearchTerm(event.target.value)}
+              placeholder="Search by name, username, email, role, or status"
+              className="pl-9"
+            />
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md border overflow-x-auto">
-            <Table>
+          <div className="grid gap-3 md:grid-cols-2 xl:hidden" aria-label="System users">
+            {filteredUsers.map(systemUser => (
+              <Card key={systemUser.id} className="border-stone-300 shadow-none">
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-mono text-xs text-stone-600">@{systemUser.username}</div>
+                      <h3 className="truncate text-base font-bold text-stone-950">{systemUser.fullName}</h3>
+                      <p className="truncate text-sm text-stone-700">{systemUser.email}</p>
+                    </div>
+                    <Badge variant={systemUser.status === 'active' ? 'default' : 'secondary'}>
+                      {systemUser.status}
+                    </Badge>
+                  </div>
+                  <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-stone-200 pt-3">
+                    <div>
+                      <dt className="text-xs font-bold uppercase tracking-wide text-stone-600">Role</dt>
+                      <dd className="mt-1">
+                        <Badge variant={getRoleBadgeVariant(systemUser.role)} className={getRoleBadgeClass(systemUser.role)}>
+                          {systemUser.role.toUpperCase()}
+                        </Badge>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-bold uppercase tracking-wide text-stone-600">Last Login</dt>
+                      <dd className="mt-0.5 text-sm text-stone-800">
+                        {new Date(systemUser.lastLogin).toLocaleDateString()}
+                      </dd>
+                    </div>
+                  </dl>
+                  <div className="mt-4 grid grid-cols-2 gap-2 border-t border-stone-200 pt-3">
+                    <Button variant="outline" onClick={() => openEditDialog(systemUser)}>
+                      <Edit className="h-4 w-4" />
+                      Edit
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => openDeleteDialog(systemUser)}
+                      className="border-red-300 text-red-700 hover:bg-red-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+            {filteredUsers.length === 0 && (
+              <Alert className="md:col-span-2">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>No users match “{searchTerm}”.</AlertDescription>
+              </Alert>
+            )}
+          </div>
+
+          <div className="hidden rounded-md border overflow-x-auto xl:block">
+            <Table aria-label="System users">
+              <TableCaption className="sr-only">
+                System users with roles, account status, last login, and management actions.
+              </TableCaption>
               <TableHeader>
                 <TableRow>
                   <TableHead>Username</TableHead>
@@ -224,7 +355,7 @@ export default function UsersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {users.map((user) => (
+                {filteredUsers.map((user) => (
                   <TableRow key={user.id}>
                     <TableCell className="font-medium">{user.username}</TableCell>
                     <TableCell>{user.fullName}</TableCell>
@@ -248,6 +379,7 @@ export default function UsersPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => openEditDialog(user)}
+                          aria-label={`Edit user ${user.fullName}`}
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
@@ -255,6 +387,7 @@ export default function UsersPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => openDeleteDialog(user)}
+                          aria-label={`Delete user ${user.fullName}`}
                         >
                           <Trash2 className="h-4 w-4 text-red-600" />
                         </Button>
@@ -262,6 +395,13 @@ export default function UsersPage() {
                     </TableCell>
                   </TableRow>
                 ))}
+                {filteredUsers.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="py-8 text-center text-stone-600">
+                      No users match “{searchTerm}”.
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </div>
@@ -277,24 +417,27 @@ export default function UsersPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Username</Label>
+              <Label htmlFor="add-user-username">Username</Label>
               <Input
+                id="add-user-username"
                 value={formData.username}
                 onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                 placeholder="Enter username"
               />
             </div>
             <div className="space-y-2">
-              <Label>Full Name</Label>
+              <Label htmlFor="add-user-full-name">Full Name</Label>
               <Input
+                id="add-user-full-name"
                 value={formData.fullName}
                 onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
                 placeholder="Enter full name"
               />
             </div>
             <div className="space-y-2">
-              <Label>Email</Label>
+              <Label htmlFor="add-user-email">Email</Label>
               <Input
+                id="add-user-email"
                 type="email"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
@@ -302,8 +445,9 @@ export default function UsersPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Password</Label>
+              <Label htmlFor="add-user-password">Password</Label>
               <Input
+                id="add-user-password"
                 type="password"
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
@@ -311,26 +455,32 @@ export default function UsersPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Role</Label>
+              <Label id="add-user-role-label">Role</Label>
               <Select
                 value={formData.role}
                 onValueChange={(value: 'admin' | 'staff' | 'engineer' | 'manager') => setFormData({ ...formData, role: value })}
               >
-                <SelectTrigger>
+                <SelectTrigger aria-labelledby="add-user-role-label">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="admin">Admin - Full Access</SelectItem>
                   <SelectItem value="staff">Warehouse Staff - Manage IN/OUT</SelectItem>
-                  <SelectItem value="engineer">Engineer - Submit Requests</SelectItem>
-                  <SelectItem value="manager">Project Manager - Approve Requests</SelectItem>
+                  <SelectItem value="engineer">Engineer - Inventory and Messages</SelectItem>
+                  <SelectItem value="manager">Project Manager - Submit Requests</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleAdd} className="bg-yellow-500 hover:bg-yellow-600 text-stone-950">Create User</Button>
+            <Button
+              onClick={handleAdd}
+              disabled={!formData.username.trim() || !formData.fullName.trim() || !formData.email.trim() || formData.password.length < 8}
+              className="bg-yellow-500 hover:bg-yellow-600 text-stone-950"
+            >
+              Create User
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -344,34 +494,37 @@ export default function UsersPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Username</Label>
+              <Label htmlFor="edit-user-username">Username</Label>
               <Input
+                id="edit-user-username"
                 value={formData.username}
                 onChange={(e) => setFormData({ ...formData, username: e.target.value })}
               />
             </div>
             <div className="space-y-2">
-              <Label>Full Name</Label>
+              <Label htmlFor="edit-user-full-name">Full Name</Label>
               <Input
+                id="edit-user-full-name"
                 value={formData.fullName}
                 onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
               />
             </div>
             <div className="space-y-2">
-              <Label>Email</Label>
+              <Label htmlFor="edit-user-email">Email</Label>
               <Input
+                id="edit-user-email"
                 type="email"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
               />
             </div>
             <div className="space-y-2">
-              <Label>Role</Label>
+              <Label id="edit-user-role-label">Role</Label>
               <Select
                 value={formData.role}
                 onValueChange={(value: 'admin' | 'staff' | 'engineer' | 'manager') => setFormData({ ...formData, role: value })}
               >
-                <SelectTrigger>
+                <SelectTrigger aria-labelledby="edit-user-role-label">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

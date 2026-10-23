@@ -1,9 +1,10 @@
 import PageTransition from '../components/PageTransition';
 import { useState } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+import { useSearchParams } from 'react-router';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import {
   Shield,
   Lock,
@@ -37,7 +38,7 @@ interface SecurityEvent {
 }
 
 export default function SecurityCenterPage() {
-  const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [lastUpdated, setLastUpdated] = useState(new Date().toLocaleString());
 
   // Mock security events
@@ -107,6 +108,14 @@ export default function SecurityCenterPage() {
       ipAddress: 'Internal'
     }
   ];
+  const requestedStatus = searchParams.get('status');
+  const statusFilter =
+    requestedStatus === 'allowed' || requestedStatus === 'blocked' || requestedStatus === 'alert'
+      ? requestedStatus
+      : 'all';
+  const filteredSecurityEvents = statusFilter === 'all'
+    ? securityEvents
+    : securityEvents.filter(event => event.status === statusFilter);
 
   const networkSecurityFeatures = [
     {
@@ -187,7 +196,7 @@ export default function SecurityCenterPage() {
     const statusConfig = {
       allowed: { label: 'Allowed', className: 'bg-green-600 hover:bg-green-600', icon: CheckCircle },
       blocked: { label: 'Blocked', className: 'bg-red-600 hover:bg-red-600', icon: XCircle },
-      alert: { label: 'Alert', className: 'bg-red-700 hover:bg-red-700', icon: AlertTriangle }
+      alert: { label: 'Alert', className: 'bg-amber-500 text-stone-950 hover:bg-amber-500', icon: AlertTriangle }
     };
 
     const config = statusConfig[status];
@@ -203,6 +212,28 @@ export default function SecurityCenterPage() {
 
   const handleRefresh = () => {
     setLastUpdated(new Date().toLocaleString());
+  };
+
+  const handleExport = () => {
+    const rows = [
+      ['Event ID', 'Type', 'Description', 'Status', 'Timestamp'],
+      ...filteredSecurityEvents.map(event => [
+        event.id,
+        event.eventType,
+        event.details,
+        event.status,
+        event.timestamp,
+      ]),
+    ];
+    const csv = rows
+      .map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `hvl-security-report-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   const blockedThreats = securityEvents.filter(e => e.status === 'blocked').length;
@@ -233,6 +264,7 @@ export default function SecurityCenterPage() {
             Refresh
           </Button>
           <Button
+            onClick={handleExport}
             className="bg-yellow-500 hover:bg-yellow-600 text-stone-950 gap-2"
             size="sm"
           >
@@ -277,14 +309,14 @@ export default function SecurityCenterPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-red-800 bg-red-700">
+        <Card className="border-blue-900 bg-blue-950">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-white">Last Security Scan</CardTitle>
-            <Clock className="h-5 w-5 text-red-100" />
+            <Clock className="h-5 w-5 text-blue-100" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-900">Apr 19</div>
-            <p className="text-xs text-red-700 mt-1">Next scan: Apr 21</p>
+            <div className="text-2xl font-bold text-white">Apr 19</div>
+            <p className="text-xs text-blue-100 mt-1">Next scan: Apr 21</p>
           </CardContent>
         </Card>
       </div>
@@ -362,7 +394,7 @@ export default function SecurityCenterPage() {
       {/* Security Monitoring Panel */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
               <Activity className="h-6 w-6 text-red-600" />
               <div>
@@ -370,21 +402,74 @@ export default function SecurityCenterPage() {
                 <CardDescription>Live security events and threat detection</CardDescription>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Badge className="bg-red-700 hover:bg-red-700 gap-1">
                 <Zap className="h-3 w-3" />
                 Live
               </Badge>
               {totalAlerts > 0 && (
-                <Badge className="bg-red-600 hover:bg-red-600">
+                <Badge className="bg-amber-500 text-stone-950 hover:bg-amber-500">
                   {totalAlerts} Alert{totalAlerts !== 1 ? 's' : ''}
                 </Badge>
               )}
             </div>
           </div>
+          <div className="max-w-xs pt-2">
+            <Select
+              value={statusFilter}
+              onValueChange={(value) => {
+                setSearchParams(value === 'all' ? {} : { status: value }, { replace: true });
+              }}
+            >
+              <SelectTrigger aria-label="Filter security events by status">
+                <SelectValue placeholder="Filter security events" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All security events</SelectItem>
+                <SelectItem value="blocked">Blocked events</SelectItem>
+                <SelectItem value="alert">Alerts</SelectItem>
+                <SelectItem value="allowed">Allowed events</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
+          <div className="grid gap-3 md:grid-cols-2 xl:hidden" aria-label="Security events">
+            {filteredSecurityEvents.map(event => (
+              <Card key={event.id} className="border-stone-300 shadow-none">
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-mono text-xs text-stone-600">{event.id}</div>
+                      <h3 className="text-base font-bold text-stone-950">{event.eventType}</h3>
+                    </div>
+                    {getEventStatusBadge(event.status)}
+                  </div>
+                  <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-stone-200 pt-3">
+                    <div className="col-span-2">
+                      <dt className="text-xs font-bold uppercase tracking-wide text-stone-600">Timestamp</dt>
+                      <dd className="mt-0.5 text-sm text-stone-800">{event.timestamp}</dd>
+                    </div>
+                    <div className="col-span-2">
+                      <dt className="text-xs font-bold uppercase tracking-wide text-stone-600">Details</dt>
+                      <dd className="mt-0.5 break-words text-sm text-stone-800">{event.details}</dd>
+                    </div>
+                    <div className="col-span-2">
+                      <dt className="text-xs font-bold uppercase tracking-wide text-stone-600">IP Address</dt>
+                      <dd className="mt-0.5 break-all font-mono text-sm text-stone-700">{event.ipAddress}</dd>
+                    </div>
+                  </dl>
+                </CardContent>
+              </Card>
+            ))}
+            {filteredSecurityEvents.length === 0 && (
+              <p className="border border-stone-300 p-6 text-center text-sm text-stone-600 md:col-span-2">
+                No {statusFilter} security events found.
+              </p>
+            )}
+          </div>
+
+          <div className="hidden overflow-x-auto xl:block">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-stone-300 text-left">
@@ -396,7 +481,7 @@ export default function SecurityCenterPage() {
                 </tr>
               </thead>
               <tbody>
-                {securityEvents.map((event) => (
+                {filteredSecurityEvents.map((event) => (
                   <tr key={event.id} className="border-b border-stone-300 hover:bg-stone-50">
                     <td className="py-3 text-sm text-stone-700">
                       <div className="flex items-center gap-2">
@@ -410,6 +495,13 @@ export default function SecurityCenterPage() {
                     <td className="py-3 text-sm text-stone-600 font-mono">{event.ipAddress}</td>
                   </tr>
                 ))}
+                {filteredSecurityEvents.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-sm text-stone-600">
+                      No {statusFilter} security events found.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -419,7 +511,7 @@ export default function SecurityCenterPage() {
       {/* Security Compliance Footer */}
       <Card className="bg-blue-950 border-stone-300">
         <CardContent className="pt-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-4">
               <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-md">
                 <Shield className="h-8 w-8 text-stone-800" />

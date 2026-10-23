@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import {
   Material,
   Transaction,
@@ -39,6 +39,7 @@ export interface AuthLog {
 }
 
 interface DataContextType {
+  resetPrototypeData: () => void;
   // Materials
   materials: Material[];
   addMaterial: (material: Omit<Material, 'id'>) => void;
@@ -47,17 +48,23 @@ interface DataContextType {
 
   // Transactions
   transactions: Transaction[];
-  addTransaction: (transaction: Omit<Transaction, 'id'>) => void;
+  addTransaction: (transaction: Omit<Transaction, 'id'>) => Transaction;
 
   // Material Requests
   requests: MaterialRequest[];
-  addRequest: (request: Omit<MaterialRequest, 'id'>) => void;
+  addRequest: (request: Omit<MaterialRequest, 'id' | 'requestDate' | 'status'>) => void;
+  updatePendingRequest: (
+    id: string,
+    requestedById: string,
+    updates: Pick<MaterialRequest, 'quantity' | 'purpose' | 'dateNeeded'>
+  ) => boolean;
+  cancelPendingRequest: (id: string, requestedById: string, cancelledBy: string) => boolean;
   approveRequest: (id: string, reviewedBy: string) => void;
   rejectRequest: (id: string, reviewedBy: string, reason: string) => void;
 
   // Users
   users: SystemUser[];
-  addUser: (user: Omit<SystemUser, 'id'>) => void;
+  addUser: (user: Omit<SystemUser, 'id' | 'lastLogin'>) => void;
   updateUser: (id: string, user: Partial<SystemUser>) => void;
   deleteUser: (id: string) => void;
 
@@ -83,15 +90,78 @@ interface DataContextType {
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
+const PROTOTYPE_STORAGE_KEY = 'hvl-cmms-prototype-data-v1';
+
+interface StoredPrototypeData {
+  materials: Material[];
+  transactions: Transaction[];
+  requests: MaterialRequest[];
+  activityLogs: ActivityLog[];
+  messages: Message[];
+}
+
+function readStoredData(): StoredPrototypeData | null {
+  try {
+    const raw = window.localStorage.getItem(PROTOTYPE_STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as Partial<StoredPrototypeData>;
+    const requiredCollections = ['materials', 'transactions', 'requests', 'activityLogs', 'messages'];
+    if (!requiredCollections.every(key => Array.isArray(data[key as keyof StoredPrototypeData]))) {
+      window.localStorage.removeItem(PROTOTYPE_STORAGE_KEY);
+      return null;
+    }
+    return {
+      materials: data.materials!,
+      transactions: data.transactions!,
+      requests: data.requests!,
+      activityLogs: data.activityLogs!,
+      messages: data.messages!,
+    };
+  } catch {
+    try {
+      window.localStorage.removeItem(PROTOTYPE_STORAGE_KEY);
+    } catch {
+      // Storage can be unavailable in privacy-restricted browser contexts.
+    }
+    return null;
+  }
+}
+
 export function DataProvider({ children }: { children: ReactNode }) {
-  const [materials, setMaterials] = useState<Material[]>(mockMaterials);
-  const [transactions, setTransactions] = useState<Transaction[]>(mockTransactions);
-  const [requests, setRequests] = useState<MaterialRequest[]>(mockMaterialRequests);
+  const [initialData] = useState(readStoredData);
+  const [materials, setMaterials] = useState<Material[]>(initialData?.materials ?? mockMaterials);
+  const [transactions, setTransactions] = useState<Transaction[]>(initialData?.transactions ?? mockTransactions);
+  const [requests, setRequests] = useState<MaterialRequest[]>(initialData?.requests ?? mockMaterialRequests);
   const [users, setUsers] = useState<SystemUser[]>(mockSystemUsers);
-  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>(mockActivityLogs);
-  const [messages, setMessages] = useState<Message[]>(mockMessages);
+  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>(initialData?.activityLogs ?? mockActivityLogs);
+  const [messages, setMessages] = useState<Message[]>(initialData?.messages ?? mockMessages);
   const [pendingRegistrations, setPendingRegistrations] = useState<PendingUserRegistration[]>([]);
   const [authLogs, setAuthLogs] = useState<AuthLog[]>([]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PROTOTYPE_STORAGE_KEY, JSON.stringify({
+        materials,
+        transactions,
+        requests,
+        activityLogs,
+        messages,
+      } satisfies StoredPrototypeData));
+    } catch {
+      // The prototype remains usable in memory when storage is unavailable.
+    }
+  }, [materials, transactions, requests, activityLogs, messages]);
+
+  const resetPrototypeData = () => {
+    setMaterials(mockMaterials);
+    setTransactions(mockTransactions);
+    setRequests(mockMaterialRequests);
+    setUsers(mockSystemUsers);
+    setActivityLogs(mockActivityLogs);
+    setMessages(mockMessages);
+    setPendingRegistrations([]);
+    setAuthLogs([]);
+  };
 
   // Materials functions
   const addMaterial = (material: Omit<Material, 'id'>) => {
@@ -121,6 +191,26 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   // Transactions functions
   const addTransaction = (transaction: Omit<Transaction, 'id'>) => {
+    const material = materials.find(m => m.id === transaction.materialId);
+    if (!material) throw new Error('The selected material no longer exists.');
+    if (!Number.isFinite(transaction.quantity) || transaction.quantity <= 0) {
+      throw new Error('Quantity must be greater than zero.');
+    }
+    if (transaction.type === 'out' && transaction.quantity > material.quantity) {
+      throw new Error(`Only ${material.quantity} ${material.unit} are currently available.`);
+    }
+    const linkedRequest = transaction.relatedRequestId
+      ? requests.find(request => request.id === transaction.relatedRequestId)
+      : undefined;
+    if (transaction.relatedRequestId && (
+      !linkedRequest ||
+      linkedRequest.status !== 'approved' ||
+      linkedRequest.materialId !== transaction.materialId ||
+      linkedRequest.quantity !== transaction.quantity
+    )) {
+      throw new Error('The linked request is no longer approved or its material quantity has changed.');
+    }
+
     const newTransaction: Transaction = {
       ...transaction,
       id: `T${String(transactions.length + 1).padStart(3, '0')}`,
@@ -129,27 +219,38 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setTransactions([newTransaction, ...transactions]);
 
     // Update material quantity
-    const material = materials.find(m => m.id === transaction.materialId);
-    if (material) {
-      const newQuantity = transaction.type === 'in'
-        ? material.quantity + transaction.quantity
-        : material.quantity - transaction.quantity;
+    const newQuantity = transaction.type === 'in'
+      ? material.quantity + transaction.quantity
+      : material.quantity - transaction.quantity;
 
-      const newStatus = newQuantity === 0
-        ? 'Out of Stock'
-        : newQuantity <= material.minQuantity
-        ? 'Low Stock'
-        : 'In Stock';
+    const newStatus = newQuantity === 0
+      ? 'Out of Stock'
+      : newQuantity <= material.minQuantity
+      ? 'Low Stock'
+      : 'In Stock';
 
-      updateMaterial(transaction.materialId, {
-        quantity: Math.max(0, newQuantity),
-        status: newStatus as Material['status']
-      });
+    updateMaterial(transaction.materialId, {
+      quantity: newQuantity,
+      status: newStatus as Material['status']
+    });
+    if (linkedRequest && transaction.type === 'out') {
+      setRequests(current => current.map(request =>
+        request.id === linkedRequest.id
+          ? {
+              ...request,
+              status: 'issued' as const,
+              issuedBy: transaction.performedBy,
+              issueDate: newTransaction.date,
+              transactionId: newTransaction.id,
+            }
+          : request
+      ));
     }
+    return newTransaction;
   };
 
   // Material Requests functions
-  const addRequest = (request: Omit<MaterialRequest, 'id'>) => {
+  const addRequest = (request: Omit<MaterialRequest, 'id' | 'requestDate' | 'status'>) => {
     const newRequest: MaterialRequest = {
       ...request,
       id: `REQ${String(requests.length + 1).padStart(3, '0')}`,
@@ -167,6 +268,45 @@ export function DataProvider({ children }: { children: ReactNode }) {
       timestamp: new Date().toISOString(),
       details: `Requested ${request.quantity} ${request.unit} of ${request.materialName}`
     });
+  };
+
+  const updatePendingRequest = (
+    id: string,
+    requestedById: string,
+    updates: Pick<MaterialRequest, 'quantity' | 'purpose' | 'dateNeeded'>
+  ) => {
+    const request = requests.find(item => item.id === id);
+    if (!request || request.status !== 'pending' || request.requestedById !== requestedById) return false;
+    if (!Number.isFinite(updates.quantity) || updates.quantity <= 0 || !updates.purpose.trim() || !updates.dateNeeded) {
+      return false;
+    }
+    setRequests(current => current.map(item => item.id === id ? { ...item, ...updates } : item));
+    addActivityLog({
+      userId: requestedById,
+      username: request.requestedBy,
+      role: 'manager',
+      action: 'Material Request Updated',
+      timestamp: new Date().toISOString(),
+      details: `Updated request ${id} for ${updates.quantity} ${request.unit} of ${request.materialName}`,
+    });
+    return true;
+  };
+
+  const cancelPendingRequest = (id: string, requestedById: string, cancelledBy: string) => {
+    const request = requests.find(item => item.id === id);
+    if (!request || request.status !== 'pending' || request.requestedById !== requestedById) return false;
+    setRequests(current => current.map(item =>
+      item.id === id ? { ...item, status: 'cancelled' as const } : item
+    ));
+    addActivityLog({
+      userId: requestedById,
+      username: cancelledBy,
+      role: 'manager',
+      action: 'Material Request Cancelled',
+      timestamp: new Date().toISOString(),
+      details: `Cancelled request ${id} for ${request.quantity} ${request.unit} of ${request.materialName}`,
+    });
+    return true;
   };
 
   const approveRequest = (id: string, reviewedBy: string) => {
@@ -221,7 +361,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   // Users functions
-  const addUser = (user: Omit<SystemUser, 'id'>) => {
+  const addUser = (user: Omit<SystemUser, 'id' | 'lastLogin'>) => {
     const newUser: SystemUser = {
       ...user,
       id: String(users.length + 1),
@@ -377,6 +517,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   return (
     <DataContext.Provider
       value={{
+        resetPrototypeData,
         materials,
         addMaterial,
         updateMaterial,
@@ -385,6 +526,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         addTransaction,
         requests,
         addRequest,
+        updatePendingRequest,
+        cancelPendingRequest,
         approveRequest,
         rejectRequest,
         users,
@@ -410,14 +553,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
 }
 
 const defaultDataContext: DataContextType = {
+  resetPrototypeData: () => {},
   materials: [],
   addMaterial: () => {},
   updateMaterial: () => {},
   deleteMaterial: () => {},
   transactions: [],
-  addTransaction: () => {},
+  addTransaction: (transaction) => ({ ...transaction, id: '' }),
   requests: [],
   addRequest: () => {},
+  updatePendingRequest: () => false,
+  cancelPendingRequest: () => false,
   approveRequest: () => {},
   rejectRequest: () => {},
   users: [],

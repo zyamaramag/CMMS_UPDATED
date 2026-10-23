@@ -17,6 +17,9 @@ A Construction Materials Management System for HVL Engineering Services.
 - Settings — Profile, password, notifications, and system configuration
 - Session timeout — Automatic session expiry with live countdown modal
 - Fully responsive — Mobile-first design with safe area support for notch/Dynamic Island
+- Accessible interaction — Keyboard navigation, focus management, live announcements, and touch targets
+- Voice commands — Browser speech recognition with a typed-command fallback
+- Persistent prototype data — Operational changes survive browser refreshes
 
 ## Tech Stack
 
@@ -40,3 +43,14 @@ A Construction Materials Management System for HVL Engineering Services.
 | Manager | `manager` | `mgr123` |
 
 > MFA code and passkey are shown in a toast during the login flow (demo mode).
+
+## Build and deployment
+
+```bash
+pnpm install
+pnpm build
+```
+
+Deploy the generated `dist` directory. Vercel configuration and SPA rewrites are included in `vercel.json`.
+
+See [PROTOTYPE_GUIDE.md](PROTOTYPE_GUIDE.md) for supported voice commands, persistence boundaries, accessibility behavior, workflow measurements, and prototype limitations.

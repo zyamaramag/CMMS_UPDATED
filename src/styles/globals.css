@@ -39,6 +39,58 @@ tbody tr {
 [data-state="open"] {
   animation: fade-in-up 0.2s ease forwards;
 }
+
+/* Keep focused controls visible below sticky chrome without changing the visual layout. */
+:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+
+:where(button, a, input, textarea, select, [tabindex]) {
+  scroll-margin-block: calc(var(--header-height) + 1rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (pointer: coarse) {
+  button,
+  [role="button"],
+  [role="menuitem"],
+  [role="option"],
+  input,
+  select {
+    min-height: 44px;
+  }
+
+  button,
+  [role="button"],
+  [role="menuitem"],
+  [role="option"] {
+    min-width: 44px;
+  }
+}
+
+@media (max-width: 639px) {
+  [data-slot="dialog-content"] {
+    max-height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 1rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  [data-slot="tabs-list"] {
+    max-width: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+  }
+}
 @keyframes fade-in-up {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0);   }

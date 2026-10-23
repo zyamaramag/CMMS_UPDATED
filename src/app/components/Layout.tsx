@@ -18,15 +18,25 @@ import {
   MessageSquare,
   Shield
 } from 'lucide-react';
-import { useState } from 'react';
+import { KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './ui/utils';
+import VoiceCommandCenter from './VoiceCommandCenter';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 
 export default function Layout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const mainRef = useRef<HTMLElement>(null);
+  const navRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const pageName = navItems.find(item => item.path === location.pathname)?.label ?? 'CMMS';
+    document.title = `${pageName} | HVL Materials Management`;
+    mainRef.current?.focus({ preventScroll: true });
+  }, [location.pathname]);
 
   const handleLogout = () => {
     logout();
@@ -40,7 +50,7 @@ export default function Layout() {
     { path: '/approvals', label: 'Approvals', icon: CheckSquare, roles: ['admin'] },
     { path: '/user-approvals', label: 'User Approvals', icon: Users, roles: ['admin'] },
     { path: '/messages', label: 'Messages', icon: MessageSquare, roles: ['engineer', 'manager'] },
-    { path: '/inout', label: 'IN/OUT Tracking', icon: ArrowLeftRight, roles: ['admin', 'staff'] },
+    { path: '/inout', label: 'IN/OUT Tracking', icon: ArrowLeftRight, roles: ['admin', 'staff', 'manager'] },
     { path: '/users', label: 'User Management', icon: Users, roles: ['admin'] },
     { path: '/logs', label: 'Activity Logs', icon: Activity, roles: ['admin', 'staff'] },
     { path: '/security', label: 'Security Center', icon: Shield, roles: ['admin'] },
@@ -50,6 +60,20 @@ export default function Layout() {
   const filteredNavItems = navItems.filter(item =>
     user && item.roles.includes(user.role)
   );
+
+  const handleNavKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const items = Array.from(navRef.current?.querySelectorAll<HTMLButtonElement>('[data-nav-item]') ?? []);
+    if (!items.length) return;
+    event.preventDefault();
+    const currentIndex = Math.max(0, items.indexOf(document.activeElement as HTMLButtonElement));
+    const nextIndex =
+      event.key === 'Home' ? 0 :
+      event.key === 'End' ? items.length - 1 :
+      event.key === 'ArrowDown' ? (currentIndex + 1) % items.length :
+      (currentIndex - 1 + items.length) % items.length;
+    items[nextIndex]?.focus();
+  };
 
   const getRoleBadgeClass = (role: string) => {
     switch (role) {
@@ -63,6 +87,16 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen bg-stone-100">
+      <Button
+        type="button"
+        onClick={() => {
+          mainRef.current?.focus();
+          mainRef.current?.scrollIntoView();
+        }}
+        className="fixed left-3 top-3 z-[100] -translate-y-24 focus:translate-y-0 bg-yellow-500 text-stone-950"
+      >
+        Skip to main content
+      </Button>
       {/* Top Header — accounts for notch / Dynamic Island via safe-top */}
       <header
         className="bg-blue-950 border-b-2 border-yellow-400 sticky top-0 z-50"
@@ -99,15 +133,23 @@ export default function Layout() {
 
           {/* Right side controls */}
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="relative text-stone-400 hover:text-white hover:bg-blue-900"
-              aria-label="Notifications"
-            >
-              <Bell className="h-4 w-4" />
-              <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-yellow-400" aria-hidden="true" />
-            </Button>
+            <VoiceCommandCenter />
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="relative text-stone-400 hover:text-white hover:bg-blue-900"
+                  aria-label="Open notifications"
+                >
+                  <Bell className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72">
+                <div className="font-bold uppercase tracking-wide">Notifications</div>
+                <p className="mt-2 text-sm text-stone-600">No new notifications.</p>
+              </PopoverContent>
+            </Popover>
 
             <div className="flex items-center gap-1.5 sm:gap-2 pl-1.5 sm:pl-2 border-l border-stone-700">
               {/* User info — hidden on very small screens */}
@@ -144,7 +186,12 @@ export default function Layout() {
           )}
           style={{ paddingBottom: 'var(--safe-bottom)' }}
         >
-          <nav className="flex-1 p-3 space-y-0.5 pt-4">
+          <nav
+            ref={navRef}
+            aria-label="Primary navigation"
+            onKeyDown={handleNavKeyDown}
+            className="flex-1 p-3 space-y-0.5 pt-4"
+          >
             {filteredNavItems.map((item, index) => {
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
@@ -165,6 +212,8 @@ export default function Layout() {
                       navigate(item.path);
                       setIsSidebarOpen(false);
                     }}
+                    data-nav-item
+                    aria-current={isActive ? 'page' : undefined}
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     <span className="truncate">{item.label}</span>
@@ -191,12 +240,22 @@ export default function Layout() {
               transition={{ duration: 0.2 }}
               className="fixed inset-0 bg-black/50 z-30 lg:hidden"
               onClick={() => setIsSidebarOpen(false)}
+              role="button"
+              tabIndex={0}
+              aria-label="Close navigation"
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') setIsSidebarOpen(false);
+              }}
             />
           )}
         </AnimatePresence>
 
         {/* Main content */}
         <main
+          ref={mainRef}
+          id="main-content"
+          tabIndex={-1}
+          aria-label="Main content"
           className="flex-1 min-w-0 p-3 sm:p-5 lg:p-8"
           style={{
             paddingLeft: 'max(0.75rem, var(--safe-left))',

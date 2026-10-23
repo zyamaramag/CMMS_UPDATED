@@ -1,5 +1,6 @@
 import PageTransition from '../components/PageTransition';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 import { useData } from '../contexts/DataContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -22,10 +23,16 @@ import { Alert, AlertDescription } from '../components/ui/alert';
 import { toast } from 'sonner';
 import { Message } from '../data/mockData';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { useAccessibility } from '../contexts/AccessibilityContext';
 
 export default function MessagesPage() {
   const { user } = useAuth();
   const { messages, addMessage, markMessageAsRead, users, requests } = useData();
+  const { announce } = useAccessibility();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') === 'sent' ? 'sent' : 'received');
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [isViewOpen, setIsViewOpen] = useState(false);
@@ -38,6 +45,36 @@ export default function MessagesPage() {
 
   const isEngineer = user?.role === 'engineer';
   const isManager = user?.role === 'manager';
+
+  // Get recipients (engineers for managers, managers for engineers)
+  const recipients = users.filter(u =>
+    u.status === 'active' && (isEngineer ? u.role === 'manager' : u.role === 'engineer')
+  );
+
+  useEffect(() => {
+    const voiceMessageDraft = (location.state as {
+      voiceMessageDraft?: {
+        recipientId: string;
+        subject: string;
+        content: string;
+        relatedRequestId: string;
+      };
+    } | null)?.voiceMessageDraft;
+    if (!voiceMessageDraft || (!isEngineer && !isManager)) return;
+
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+    if (!recipients.some(recipient => recipient.id === voiceMessageDraft.recipientId)) {
+      announce('The voice-selected message recipient is not available.', 'assertive');
+      return;
+    }
+    setFormData(voiceMessageDraft);
+    setIsComposeOpen(true);
+    announce('Message draft opened. Review all fields before sending.');
+  }, [announce, isEngineer, isManager, location.pathname, location.search, location.state, navigate, recipients]);
+
+  useEffect(() => {
+    setActiveTab(searchParams.get('tab') === 'sent' ? 'sent' : 'received');
+  }, [searchParams]);
 
   if (!isEngineer && !isManager) {
     return (
@@ -56,15 +93,14 @@ export default function MessagesPage() {
     );
   }
 
-  // Get recipients (engineers for managers, managers for engineers)
-  const recipients = users.filter(u => 
-    isEngineer ? u.role === 'manager' : u.role === 'engineer'
-  );
-
   // Filter messages for current user
   const receivedMessages = messages.filter(m => m.recipientId === user?.id);
   const sentMessages = messages.filter(m => m.senderId === user?.id);
   const unreadCount = receivedMessages.filter(m => !m.read).length;
+  const unreadOnly = searchParams.get('filter') === 'unread';
+  const displayedReceivedMessages = unreadOnly
+    ? receivedMessages.filter(message => !message.read)
+    : receivedMessages;
 
   const handleCompose = () => {
     setFormData({
@@ -91,10 +127,10 @@ export default function MessagesPage() {
     addMessage({
       senderId: user.id,
       senderName: user.fullName,
-      senderRole: user.role,
+      senderRole: user.role as 'engineer' | 'manager',
       recipientId: recipient.id,
       recipientName: recipient.fullName,
-      recipientRole: recipient.role,
+      recipientRole: recipient.role as 'engineer' | 'manager',
       subject: formData.subject,
       content: formData.content,
       timestamp: new Date().toISOString(),
@@ -103,6 +139,7 @@ export default function MessagesPage() {
     });
 
     toast.success(`Message sent to ${recipient.fullName}`);
+    announce(`Message sent to ${recipient.fullName}.`);
     setIsComposeOpen(false);
     setFormData({ recipientId: '', subject: '', content: '', relatedRequestId: '' });
   };
@@ -191,7 +228,20 @@ export default function MessagesPage() {
           <CardDescription>View and manage your conversations</CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="received">
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => {
+              setActiveTab(value);
+              const nextParams = new URLSearchParams(searchParams);
+              if (value === 'sent') {
+                nextParams.set('tab', 'sent');
+                nextParams.delete('filter');
+              } else {
+                nextParams.delete('tab');
+              }
+              setSearchParams(nextParams, { replace: true });
+            }}
+          >
             <TabsList className="mb-4">
               <TabsTrigger value="received">
                 Received ({receivedMessages.length})
@@ -203,17 +253,42 @@ export default function MessagesPage() {
 
             <TabsContent value="received">
               <div className="space-y-2">
-                {receivedMessages.length === 0 ? (
+                {unreadOnly && (
+                  <Alert className="mb-4">
+                    <Mail className="h-4 w-4" />
+                    <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+                      <span>Showing unread messages only.</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const nextParams = new URLSearchParams(searchParams);
+                          nextParams.delete('filter');
+                          setSearchParams(nextParams, { replace: true });
+                        }}
+                      >
+                        Show all received
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {displayedReceivedMessages.length === 0 ? (
                   <Alert>
                     <AlertCircle className="h-4 w-4" />
-                    <AlertDescription>No received messages yet.</AlertDescription>
+                    <AlertDescription>
+                      {unreadOnly ? 'No unread messages.' : 'No received messages yet.'}
+                    </AlertDescription>
                   </Alert>
                 ) : (
-                  receivedMessages.map((message) => (
-                    <div
+                  displayedReceivedMessages.map((message) => (
+                    <Button
                       key={message.id}
+                      type="button"
+                      variant="ghost"
                       onClick={() => handleViewMessage(message)}
-                      className={`p-4 border rounded-lg cursor-pointer transition-colors hover:bg-stone-50 ${
+                      aria-label={`${message.read ? 'Read' : 'Unread'} message from ${message.senderName}: ${message.subject}`}
+                      className={`h-auto w-full whitespace-normal p-4 border rounded-lg text-left items-stretch transition-colors hover:bg-stone-50 ${
                         !message.read ? 'bg-red-50 border-stone-900/20' : 'bg-white'
                       }`}
                     >
@@ -247,7 +322,7 @@ export default function MessagesPage() {
                           {formatTimestamp(message.timestamp)}
                         </div>
                       </div>
-                    </div>
+                    </Button>
                   ))
                 )}
               </div>
@@ -262,10 +337,13 @@ export default function MessagesPage() {
                   </Alert>
                 ) : (
                   sentMessages.map((message) => (
-                    <div
+                    <Button
                       key={message.id}
+                      type="button"
+                      variant="ghost"
                       onClick={() => handleViewMessage(message)}
-                      className="p-4 border rounded-lg cursor-pointer transition-colors hover:bg-stone-50 bg-white"
+                      aria-label={`Sent message to ${message.recipientName}: ${message.subject}`}
+                      className="h-auto w-full whitespace-normal p-4 border rounded-lg text-left items-stretch transition-colors hover:bg-stone-50 bg-white"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
@@ -289,7 +367,7 @@ export default function MessagesPage() {
                           {formatTimestamp(message.timestamp)}
                         </div>
                       </div>
-                    </div>
+                    </Button>
                   ))
                 )}
               </div>
@@ -309,12 +387,12 @@ export default function MessagesPage() {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>Recipient</Label>
+              <Label id="message-recipient-label">Recipient</Label>
               <Select
                 value={formData.recipientId}
                 onValueChange={(value) => setFormData({ ...formData, recipientId: value })}
               >
-                <SelectTrigger>
+                <SelectTrigger aria-labelledby="message-recipient-label">
                   <SelectValue placeholder="Select recipient" />
                 </SelectTrigger>
                 <SelectContent>
@@ -328,12 +406,12 @@ export default function MessagesPage() {
             </div>
 
             <div className="space-y-2">
-              <Label>Related Request (Optional)</Label>
+              <Label id="related-request-label">Related Request (Optional)</Label>
               <Select
                 value={formData.relatedRequestId || 'none'}
                 onValueChange={(value) => setFormData({ ...formData, relatedRequestId: value === 'none' ? '' : value })}
               >
-                <SelectTrigger>
+                <SelectTrigger aria-labelledby="related-request-label">
                   <SelectValue placeholder="Select request (optional)" />
                 </SelectTrigger>
                 <SelectContent>
@@ -348,8 +426,9 @@ export default function MessagesPage() {
             </div>
 
             <div className="space-y-2">
-              <Label>Subject</Label>
+              <Label htmlFor="message-subject">Subject</Label>
               <Input
+                id="message-subject"
                 value={formData.subject}
                 onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
                 placeholder="Enter subject"
@@ -357,8 +436,9 @@ export default function MessagesPage() {
             </div>
 
             <div className="space-y-2">
-              <Label>Message</Label>
+              <Label htmlFor="message-content">Message</Label>
               <Textarea
+                id="message-content"
                 value={formData.content}
                 onChange={(e) => setFormData({ ...formData, content: e.target.value })}
                 placeholder="Type your message here..."

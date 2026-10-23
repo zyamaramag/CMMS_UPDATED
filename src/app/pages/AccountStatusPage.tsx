@@ -78,7 +78,7 @@ export default function AccountStatusPage() {
     <div className="min-h-screen bg-stone-50 flex items-center justify-center p-4">
       <Card className="w-full max-w-2xl shadow-none border-stone-300">
         <CardHeader className="space-y-2 bg-blue-950 text-white rounded-t-lg">
-          <CardTitle className="text-2xl text-center">Check Registration Status</CardTitle>
+          <CardTitle role="heading" aria-level={1} className="text-2xl text-center">Check Registration Status</CardTitle>
           <CardDescription className="text-center text-stone-100">
             HVL Engineering Services - Account Registration
           </CardDescription>
@@ -123,7 +123,7 @@ export default function AccountStatusPage() {
               {/* Registration Details */}
               <Card className="bg-white">
                 <CardHeader>
-                  <CardTitle className="text-lg">Registration Details</CardTitle>
+                  <CardTitle role="heading" aria-level={2} className="text-lg">Registration Details</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="grid gap-3 md:grid-cols-2">

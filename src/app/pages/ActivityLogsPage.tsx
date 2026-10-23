@@ -1,5 +1,6 @@
 import PageTransition from '../components/PageTransition';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -12,6 +13,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableCaption,
 } from '../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Search, Activity } from 'lucide-react';
@@ -19,9 +21,14 @@ import { Search, Activity } from 'lucide-react';
 export default function ActivityLogsPage() {
   const { activityLogs } = useData();
   const { user } = useAuth();
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchParams] = useSearchParams();
+  const [searchTerm, setSearchTerm] = useState(searchParams.get('q') ?? '');
   const [roleFilter, setRoleFilter] = useState('all');
   const [actionFilter, setActionFilter] = useState('all');
+
+  useEffect(() => {
+    setSearchTerm(searchParams.get('q') ?? '');
+  }, [searchParams]);
 
   // Filter logs based on user role
   const roleBasedLogs = activityLogs.filter(log => {
@@ -105,6 +112,7 @@ export default function ActivityLogsPage() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-stone-500" />
                 <Input
+                  aria-label="Search activity logs"
                   placeholder="Search logs..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
@@ -113,7 +121,7 @@ export default function ActivityLogsPage() {
               </div>
             </div>
             <Select value={roleFilter} onValueChange={setRoleFilter}>
-              <SelectTrigger className="w-full sm:w-[180px]">
+              <SelectTrigger className="w-full sm:w-[180px]" aria-label="Filter activity logs by role">
                 <SelectValue placeholder="Filter by role" />
               </SelectTrigger>
               <SelectContent>
@@ -124,7 +132,7 @@ export default function ActivityLogsPage() {
               </SelectContent>
             </Select>
             <Select value={actionFilter} onValueChange={setActionFilter}>
-              <SelectTrigger className="w-full sm:w-[180px]">
+              <SelectTrigger className="w-full sm:w-[180px]" aria-label="Filter activity logs by action">
                 <SelectValue placeholder="Filter by action" />
               </SelectTrigger>
               <SelectContent>
@@ -137,8 +145,45 @@ export default function ActivityLogsPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md border overflow-x-auto">
-            <Table>
+          <div className="grid gap-3 md:grid-cols-2 xl:hidden" aria-label="System activity log">
+            {filteredLogs.length > 0 ? filteredLogs.map(log => (
+              <Card key={log.id} className="border-stone-300 shadow-none">
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-mono text-xs text-stone-600">{log.id}</div>
+                      <h3 className="truncate text-base font-bold text-stone-950">{log.action}</h3>
+                    </div>
+                    <Badge variant={getRoleBadgeVariant(log.role)}>{log.role}</Badge>
+                  </div>
+                  <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-stone-200 pt-3">
+                    <div>
+                      <dt className="text-xs font-bold uppercase tracking-wide text-stone-600">User</dt>
+                      <dd className="mt-0.5 text-sm font-semibold">{log.username}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-bold uppercase tracking-wide text-stone-600">Timestamp</dt>
+                      <dd className="mt-0.5 text-sm">{new Date(log.timestamp).toLocaleString()}</dd>
+                    </div>
+                    <div className="col-span-2">
+                      <dt className="text-xs font-bold uppercase tracking-wide text-stone-600">Details</dt>
+                      <dd className="mt-0.5 break-words text-sm text-stone-800">{log.details}</dd>
+                    </div>
+                  </dl>
+                </CardContent>
+              </Card>
+            )) : (
+              <div className="border border-stone-300 p-6 text-center text-sm text-stone-600">
+                {user?.role === 'staff' ? 'No IN/OUT transactions recorded yet' : 'No activity logs found'}
+              </div>
+            )}
+          </div>
+
+          <div className="hidden rounded-md border overflow-x-auto xl:block">
+            <Table aria-label="System activity log">
+              <TableCaption className="sr-only">
+                Audit history with timestamp, user, role, action, and details.
+              </TableCaption>
               <TableHeader>
                 <TableRow>
                   <TableHead>Timestamp</TableHead>

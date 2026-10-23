@@ -20,6 +20,7 @@ export interface Transaction {
   assignedTo: string;
   notes: string;
   performedBy: string;
+  relatedRequestId?: string;
 }
 
 export interface MaterialRequest {
@@ -33,10 +34,13 @@ export interface MaterialRequest {
   requestedBy: string;
   requestedById: string;
   requestDate: string;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'issued';
   reviewedBy?: string;
   reviewDate?: string;
   rejectionReason?: string;
+  issuedBy?: string;
+  issueDate?: string;
+  transactionId?: string;
 }
 
 export interface SystemUser {

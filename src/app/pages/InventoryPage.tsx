@@ -1,5 +1,6 @@
 import PageTransition from '../components/PageTransition';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 import { useData } from '../contexts/DataContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -13,6 +14,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableCaption,
 } from '../components/ui/table';
 import {
   Dialog,
@@ -28,14 +30,20 @@ import { Search, Plus, Edit, Trash2, AlertCircle, Filter, X, Package, CheckCircl
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { toast } from 'sonner';
+import { useAccessibility } from '../contexts/AccessibilityContext';
 
 export default function InventoryPage() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { announce } = useAccessibility();
   const { materials, addMaterial, updateMaterial, deleteMaterial, addActivityLog } = useData();
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [stockStatusFilter, setStockStatusFilter] = useState('all');
   const [sizeFilter, setSizeFilter] = useState('all');
+  const [sortOrder, setSortOrder] = useState('name');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -49,7 +57,61 @@ export default function InventoryPage() {
     minQuantity: 0
   });
 
-  const canEdit = user?.role === 'staff'; // Only warehouse staff can edit inventory
+  useEffect(() => {
+    const query = searchParams.get('q');
+    const status = searchParams.get('status');
+    if (query !== null) setSearchTerm(query);
+    if (status === 'In Stock' || status === 'Low Stock' || status === 'Out of Stock') {
+      setStockStatusFilter(status);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const voiceState = location.state as {
+      voiceMaterialDraft?: { name: string };
+      voiceEditMaterialId?: string;
+    } | null;
+    if (
+      (!voiceState?.voiceMaterialDraft && !voiceState?.voiceEditMaterialId) ||
+      (user?.role !== 'admin' && user?.role !== 'staff')
+    ) return;
+
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+    if (voiceState.voiceMaterialDraft) {
+      setFormData({
+        name: voiceState.voiceMaterialDraft.name,
+        category: '',
+        size: '',
+        quantity: 0,
+        unit: '',
+        minQuantity: 0,
+      });
+      setIsAddDialogOpen(true);
+      announce('New material form opened. Review and complete all inventory fields before adding it.');
+      return;
+    }
+
+    if (voiceState.voiceEditMaterialId) {
+      const material = materials.find(item => item.id === voiceState.voiceEditMaterialId);
+      if (!material) {
+        announce('The voice-selected material is no longer available.', 'assertive');
+        return;
+      }
+      setSelectedMaterial(material);
+      setFormData({
+        name: material.name,
+        category: material.category,
+        size: material.size ?? '',
+        quantity: material.quantity,
+        unit: material.unit,
+        minQuantity: material.minQuantity,
+      });
+      setIsEditDialogOpen(true);
+      announce(`Edit form opened for ${material.name}. Review all fields before saving.`);
+    }
+  }, [announce, location.pathname, location.search, location.state, materials, navigate, user?.role]);
+
+  const canEdit = user?.role === 'admin' || user?.role === 'staff';
   const canView = true;
 
   // Get unique categories and sizes
@@ -58,13 +120,19 @@ export default function InventoryPage() {
 
   // Advanced filtering
   const filteredMaterials = materials.filter(material => {
-    const matchesSearch = material.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    const matchesSearch = material.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         material.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          material.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          (material.size && material.size.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesCategory = categoryFilter === 'all' || material.category === categoryFilter;
     const matchesStockStatus = stockStatusFilter === 'all' || material.status === stockStatusFilter;
     const matchesSize = sizeFilter === 'all' || material.size === sizeFilter;
     return matchesSearch && matchesCategory && matchesStockStatus && matchesSize;
+  }).sort((a, b) => {
+    if (sortOrder === 'quantity-low') return a.quantity - b.quantity;
+    if (sortOrder === 'quantity-high') return b.quantity - a.quantity;
+    if (sortOrder === 'updated') return new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime();
+    return `${a.name} ${a.size ?? ''}`.localeCompare(`${b.name} ${b.size ?? ''}`);
   });
 
   // Count statistics
@@ -76,6 +144,14 @@ export default function InventoryPage() {
   };
 
   const handleAdd = () => {
+    if (!formData.name.trim() || !formData.category.trim() || !formData.unit.trim()) {
+      toast.error('Material name, category, and unit are required');
+      return;
+    }
+    if (formData.quantity < 0 || formData.minQuantity < 0) {
+      toast.error('Inventory quantities cannot be negative');
+      return;
+    }
     const status = formData.quantity === 0 ? 'Out of Stock' : formData.quantity <= formData.minQuantity ? 'Low Stock' : 'In Stock';
 
     addMaterial({
@@ -105,6 +181,14 @@ export default function InventoryPage() {
 
   const handleEdit = () => {
     if (!selectedMaterial) return;
+    if (!formData.name.trim() || !formData.category.trim() || !formData.unit.trim()) {
+      toast.error('Material name, category, and unit are required');
+      return;
+    }
+    if (formData.quantity < 0 || formData.minQuantity < 0) {
+      toast.error('Inventory quantities cannot be negative');
+      return;
+    }
 
     const status = formData.quantity === 0 ? 'Out of Stock' : formData.quantity <= formData.minQuantity ? 'Low Stock' : 'In Stock';
 
@@ -201,7 +285,7 @@ export default function InventoryPage() {
         <Alert>
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            You have view-only access to inventory. Only warehouse staff can make changes.
+            You have view-only access to inventory. Admin and Warehouse Staff can make changes.
           </AlertDescription>
         </Alert>
       )}
@@ -230,14 +314,14 @@ export default function InventoryPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-red-800 bg-red-700">
+        <Card className="border-amber-700 bg-amber-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-white">Low Stock</CardTitle>
-            <AlertCircle className="h-4 w-4 text-red-100" />
+            <CardTitle className="text-sm font-medium text-stone-950">Low Stock</CardTitle>
+            <AlertCircle className="h-4 w-4 text-stone-950" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-white">{statsData.lowStock}</div>
-            <p className="text-xs text-red-100 mt-1">Need replenishment</p>
+            <div className="text-2xl font-bold text-stone-950">{statsData.lowStock}</div>
+            <p className="text-xs text-stone-900 mt-1">Need replenishment</p>
           </CardContent>
         </Card>
 
@@ -266,6 +350,8 @@ export default function InventoryPage() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-stone-500" />
                 <Input
+                  id="inventory-search"
+                  aria-label="Search inventory by material ID, name, category, or size"
                   placeholder="Search materials by name, category, or size..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
@@ -275,9 +361,9 @@ export default function InventoryPage() {
             </div>
             
             {/* Filter Controls */}
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-4">
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger>
+                <SelectTrigger aria-label="Filter inventory by category">
                   <SelectValue placeholder="Filter by category" />
                 </SelectTrigger>
                 <SelectContent>
@@ -289,7 +375,7 @@ export default function InventoryPage() {
               </Select>
 
               <Select value={stockStatusFilter} onValueChange={setStockStatusFilter}>
-                <SelectTrigger>
+                <SelectTrigger aria-label="Filter inventory by stock status">
                   <SelectValue placeholder="Filter by stock status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -301,7 +387,7 @@ export default function InventoryPage() {
               </Select>
 
               <Select value={sizeFilter} onValueChange={setSizeFilter}>
-                <SelectTrigger>
+                <SelectTrigger aria-label="Filter inventory by material size">
                   <SelectValue placeholder="Filter by size" />
                 </SelectTrigger>
                 <SelectContent>
@@ -309,6 +395,18 @@ export default function InventoryPage() {
                   {sizes.map(size => (
                     <SelectItem key={size} value={size}>{size}</SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={sortOrder} onValueChange={setSortOrder}>
+                <SelectTrigger aria-label="Sort inventory">
+                  <SelectValue placeholder="Sort inventory" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="name">Name A–Z</SelectItem>
+                  <SelectItem value="quantity-low">Quantity: Low to High</SelectItem>
+                  <SelectItem value="quantity-high">Quantity: High to Low</SelectItem>
+                  <SelectItem value="updated">Recently Updated</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -320,25 +418,61 @@ export default function InventoryPage() {
                 {searchTerm && (
                   <Badge variant="outline" className="gap-1">
                     Search: {searchTerm}
-                    <X className="h-3 w-3 cursor-pointer" onClick={() => setSearchTerm('')} />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 p-0 hover:bg-stone-200"
+                      onClick={() => setSearchTerm('')}
+                      aria-label="Clear search filter"
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
                   </Badge>
                 )}
                 {categoryFilter !== 'all' && (
                   <Badge variant="outline" className="gap-1">
                     Category: {categoryFilter}
-                    <X className="h-3 w-3 cursor-pointer" onClick={() => setCategoryFilter('all')} />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 p-0 hover:bg-stone-200"
+                      onClick={() => setCategoryFilter('all')}
+                      aria-label="Clear category filter"
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
                   </Badge>
                 )}
                 {stockStatusFilter !== 'all' && (
                   <Badge variant="outline" className="gap-1">
                     Status: {stockStatusFilter}
-                    <X className="h-3 w-3 cursor-pointer" onClick={() => setStockStatusFilter('all')} />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 p-0 hover:bg-stone-200"
+                      onClick={() => setStockStatusFilter('all')}
+                      aria-label="Clear stock status filter"
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
                   </Badge>
                 )}
                 {sizeFilter !== 'all' && (
                   <Badge variant="outline" className="gap-1">
                     Size: {sizeFilter}
-                    <X className="h-3 w-3 cursor-pointer" onClick={() => setSizeFilter('all')} />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 p-0 hover:bg-stone-200"
+                      onClick={() => setSizeFilter('all')}
+                      aria-label="Clear size filter"
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
                   </Badge>
                 )}
                 <Button
@@ -359,8 +493,102 @@ export default function InventoryPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md border overflow-x-auto">
-            <Table>
+          <div className="sr-only" aria-live="polite" aria-atomic="true">
+            {filteredMaterials.length} material {filteredMaterials.length === 1 ? 'result' : 'results'} found.
+          </div>
+
+          {/* Cards keep the same information and actions readable without sideways scrolling. */}
+          <div className="grid gap-3 md:grid-cols-2 xl:hidden" aria-label="Inventory materials">
+            {filteredMaterials.length > 0 ? (
+              filteredMaterials.map(material => (
+                <Card key={material.id} className="border-stone-300 shadow-none">
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-mono text-xs text-stone-600">{material.id}</div>
+                        <h3 className="truncate text-base font-bold text-stone-950">{material.name}</h3>
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          <Badge variant="outline" className="text-xs">{material.category}</Badge>
+                          {material.size && (
+                            <Badge className="bg-stone-200 text-stone-900 hover:bg-stone-300 text-xs">
+                              {material.size}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                      <Badge
+                        className={`flex shrink-0 items-center gap-1 ${
+                          material.status === 'In Stock'
+                            ? 'bg-green-600 text-white hover:bg-green-700'
+                            : material.status === 'Low Stock'
+                            ? 'bg-amber-500 text-stone-950 hover:bg-amber-600'
+                            : 'bg-red-600 text-white hover:bg-red-700'
+                        }`}
+                      >
+                        {material.status === 'In Stock' && <CheckCircle className="h-3 w-3" />}
+                        {material.status === 'Low Stock' && <AlertTriangle className="h-3 w-3" />}
+                        {material.status === 'Out of Stock' && <XCircle className="h-3 w-3" />}
+                        {material.status}
+                      </Badge>
+                    </div>
+
+                    <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-stone-200 pt-3">
+                      <div>
+                        <dt className="text-xs font-bold uppercase tracking-wide text-stone-600">Quantity</dt>
+                        <dd className="mt-0.5 text-sm font-semibold text-stone-950">
+                          {material.quantity} {material.unit}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs font-bold uppercase tracking-wide text-stone-600">Minimum</dt>
+                        <dd className="mt-0.5 text-sm text-stone-800">
+                          {material.minQuantity} {material.unit}
+                        </dd>
+                      </div>
+                      <div className="col-span-2">
+                        <dt className="text-xs font-bold uppercase tracking-wide text-stone-600">Last Updated</dt>
+                        <dd className="mt-0.5 text-sm text-stone-800">
+                          {new Date(material.lastUpdated).toLocaleDateString()}
+                        </dd>
+                      </div>
+                    </dl>
+
+                    {canEdit && (
+                      <div className="mt-4 grid grid-cols-2 gap-2 border-t border-stone-200 pt-3">
+                        <Button
+                          variant="outline"
+                          onClick={() => openEditDialog(material)}
+                          aria-label={`Edit ${material.name} ${material.size ?? ''}`.trim()}
+                        >
+                          <Edit className="h-4 w-4" />
+                          Edit
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => openDeleteDialog(material)}
+                          className="border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
+                          aria-label={`Delete ${material.name} ${material.size ?? ''}`.trim()}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Delete
+                        </Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))
+            ) : (
+              <div className="border border-stone-300 p-6 text-center text-sm text-stone-600">
+                No materials found matching your filters
+              </div>
+            )}
+          </div>
+
+          <div className="hidden rounded-md border overflow-x-auto xl:block">
+            <Table aria-label="Inventory materials">
+              <TableCaption className="sr-only">
+                Inventory materials with quantities, stock status, and last update date.
+              </TableCaption>
               <TableHeader>
                 <TableRow>
                   <TableHead>Material ID</TableHead>
@@ -398,12 +626,12 @@ export default function InventoryPage() {
                       </TableCell>
                       <TableCell>
                         <Badge
-                          className={`flex items-center gap-1 w-fit text-white ${
+                          className={`flex items-center gap-1 w-fit ${
                             material.status === 'In Stock'
-                              ? 'bg-green-600 hover:bg-green-700'
+                              ? 'bg-green-600 text-white hover:bg-green-700'
                               : material.status === 'Low Stock'
-                              ? 'bg-red-700 hover:bg-red-800'
-                              : 'bg-red-600 hover:bg-red-700'
+                              ? 'bg-amber-500 text-stone-950 hover:bg-amber-600'
+                              : 'bg-red-600 text-white hover:bg-red-700'
                           }`}
                         >
                           {material.status === 'In Stock' && <CheckCircle className="h-3 w-3" />}
@@ -423,6 +651,7 @@ export default function InventoryPage() {
                               size="sm"
                               onClick={() => openEditDialog(material)}
                               className="hover:bg-orange-50"
+                              aria-label={`Edit ${material.name} ${material.size ?? ''}`.trim()}
                             >
                               <Edit className="h-4 w-4 text-orange-600" />
                             </Button>
@@ -431,6 +660,7 @@ export default function InventoryPage() {
                               size="sm"
                               onClick={() => openDeleteDialog(material)}
                               className="hover:bg-red-50"
+                              aria-label={`Delete ${material.name} ${material.size ?? ''}`.trim()}
                             >
                               <Trash2 className="h-4 w-4 text-red-600" />
                             </Button>
@@ -461,24 +691,27 @@ export default function InventoryPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Material Name</Label>
+              <Label htmlFor="add-material-name">Material Name</Label>
               <Input
+                id="add-material-name"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="e.g., Steel Rebars 12mm"
               />
             </div>
             <div className="space-y-2">
-              <Label>Category</Label>
+              <Label htmlFor="add-material-category">Category</Label>
               <Input
+                id="add-material-category"
                 value={formData.category}
                 onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                 placeholder="e.g., Steel"
               />
             </div>
             <div className="space-y-2">
-              <Label>Size</Label>
+              <Label htmlFor="add-material-size">Size</Label>
               <Input
+                id="add-material-size"
                 value={formData.size}
                 onChange={(e) => setFormData({ ...formData, size: e.target.value })}
                 placeholder="e.g., 12mm, 10kg"
@@ -486,16 +719,19 @@ export default function InventoryPage() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Quantity</Label>
+                <Label htmlFor="add-material-quantity">Quantity</Label>
                 <Input
+                  id="add-material-quantity"
                   type="number"
+                  min={0}
                   value={formData.quantity}
                   onChange={(e) => setFormData({ ...formData, quantity: Number(e.target.value) })}
                 />
               </div>
               <div className="space-y-2">
-                <Label>Unit</Label>
+                <Label htmlFor="add-material-unit">Unit</Label>
                 <Input
+                  id="add-material-unit"
                   value={formData.unit}
                   onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
                   placeholder="e.g., pcs, bags"
@@ -503,9 +739,11 @@ export default function InventoryPage() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Minimum Quantity</Label>
+              <Label htmlFor="add-material-minimum">Minimum Quantity</Label>
               <Input
+                id="add-material-minimum"
                 type="number"
+                min={0}
                 value={formData.minQuantity}
                 onChange={(e) => setFormData({ ...formData, minQuantity: Number(e.target.value) })}
               />
@@ -513,7 +751,13 @@ export default function InventoryPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleAdd} className="bg-yellow-500 hover:bg-yellow-600 text-stone-950">Add Material</Button>
+            <Button
+              onClick={handleAdd}
+              disabled={!formData.name.trim() || !formData.category.trim() || !formData.unit.trim() || formData.quantity < 0 || formData.minQuantity < 0}
+              className="bg-yellow-500 hover:bg-yellow-600 text-stone-950"
+            >
+              Add Material
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -527,47 +771,55 @@ export default function InventoryPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Material Name</Label>
+              <Label htmlFor="edit-material-name">Material Name</Label>
               <Input
+                id="edit-material-name"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               />
             </div>
             <div className="space-y-2">
-              <Label>Category</Label>
+              <Label htmlFor="edit-material-category">Category</Label>
               <Input
+                id="edit-material-category"
                 value={formData.category}
                 onChange={(e) => setFormData({ ...formData, category: e.target.value })}
               />
             </div>
             <div className="space-y-2">
-              <Label>Size</Label>
+              <Label htmlFor="edit-material-size">Size</Label>
               <Input
+                id="edit-material-size"
                 value={formData.size}
                 onChange={(e) => setFormData({ ...formData, size: e.target.value })}
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Quantity</Label>
+                <Label htmlFor="edit-material-quantity">Quantity</Label>
                 <Input
+                  id="edit-material-quantity"
                   type="number"
+                  min={0}
                   value={formData.quantity}
                   onChange={(e) => setFormData({ ...formData, quantity: Number(e.target.value) })}
                 />
               </div>
               <div className="space-y-2">
-                <Label>Unit</Label>
+                <Label htmlFor="edit-material-unit">Unit</Label>
                 <Input
+                  id="edit-material-unit"
                   value={formData.unit}
                   onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
                 />
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Minimum Quantity</Label>
+              <Label htmlFor="edit-material-minimum">Minimum Quantity</Label>
               <Input
+                id="edit-material-minimum"
                 type="number"
+                min={0}
                 value={formData.minQuantity}
                 onChange={(e) => setFormData({ ...formData, minQuantity: Number(e.target.value) })}
               />
@@ -575,7 +827,13 @@ export default function InventoryPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleEdit} className="bg-yellow-500 hover:bg-yellow-600 text-stone-950">Save Changes</Button>
+            <Button
+              onClick={handleEdit}
+              disabled={!formData.name.trim() || !formData.category.trim() || !formData.unit.trim() || formData.quantity < 0 || formData.minQuantity < 0}
+              className="bg-yellow-500 hover:bg-yellow-600 text-stone-950"
+            >
+              Save Changes
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

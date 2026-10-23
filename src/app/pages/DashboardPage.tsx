@@ -117,6 +117,7 @@ export default function DashboardPage() {
   const navigate = useNavigate();
 
   const lowStockItems = materials.filter(m => m.status === 'Low Stock' || m.status === 'Out of Stock');
+  const lowStockCount = materials.filter(m => m.status === 'Low Stock').length;
   const totalItems = materials.length;
   const inStockItems = materials.filter(m => m.status === 'In Stock').length;
   const recentTransactions = transactions.slice(0, 5);
@@ -226,16 +227,23 @@ export default function DashboardPage() {
             <CardContent>
               <div className="space-y-3">
                 {lowStockItems.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between p-3 bg-red-50 rounded-lg border border-stone-900/20">
+                  <div
+                    key={item.id}
+                    className={`flex items-center justify-between p-3 rounded-lg border ${
+                      item.status === 'Out of Stock'
+                        ? 'bg-red-50 border-red-200'
+                        : 'bg-amber-50 border-amber-300'
+                    }`}
+                  >
                     <div>
                       <p className="font-medium text-sm">{item.name}</p>
                       <p className="text-xs text-stone-700">{item.category}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-medium text-red-700">
+                      <p className={`text-sm font-medium ${item.status === 'Out of Stock' ? 'text-red-700' : 'text-amber-800'}`}>
                         {item.quantity} {item.unit}
                       </p>
-                      <p className="text-xs text-stone-600">Min: {item.minStock}</p>
+                      <p className="text-xs text-stone-600">Min: {item.minQuantity}</p>
                     </div>
                   </div>
                 ))}
@@ -355,13 +363,21 @@ export default function DashboardPage() {
           <CardContent>
             <div className="space-y-3">
               {lowStockItems.map((item) => (
-                <div key={item.id} className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
+                <div
+                  key={item.id}
+                  className={`flex items-center justify-between p-3 rounded-lg ${
+                    item.status === 'Out of Stock' ? 'bg-red-50' : 'bg-amber-50'
+                  }`}
+                >
                   <div>
                     <p className="font-medium text-sm">{item.name}</p>
                     <p className="text-xs text-stone-700">{item.category}</p>
                   </div>
                   <div className="text-right">
-                    <Badge variant={item.status === 'Out of Stock' ? 'destructive' : 'secondary'}>
+                    <Badge
+                      variant={item.status === 'Out of Stock' ? 'destructive' : 'secondary'}
+                      className={item.status === 'Low Stock' ? 'bg-amber-500 text-stone-950' : undefined}
+                    >
                       {item.quantity} {item.unit}
                     </Badge>
                   </div>
@@ -404,10 +420,10 @@ export default function DashboardPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Low Stock Items</CardTitle>
-              <AlertTriangle className="h-4 w-4 text-red-600" />
+              <AlertTriangle className="h-4 w-4 text-amber-700" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-red-600">{lowStockItems.length}</div>
+              <div className="text-2xl font-bold text-amber-700">{lowStockCount}</div>
               <p className="text-xs text-stone-700 mt-1">May need restocking</p>
             </CardContent>
           </Card>
@@ -439,7 +455,10 @@ export default function DashboardPage() {
                       <p className="text-xs text-stone-700">{material.category}</p>
                     </div>
                     <div className="text-right">
-                      <Badge variant={material.status === 'In Stock' ? 'default' : material.status === 'Low Stock' ? 'secondary' : 'destructive'}>
+                      <Badge
+                        variant={material.status === 'In Stock' ? 'default' : material.status === 'Low Stock' ? 'secondary' : 'destructive'}
+                        className={material.status === 'Low Stock' ? 'bg-amber-500 text-stone-950' : undefined}
+                      >
                         {material.quantity} {material.unit}
                       </Badge>
                       <p className="text-xs text-stone-600 mt-1">{material.status}</p>
@@ -625,7 +644,7 @@ export default function DashboardPage() {
           <AlertCircle className="h-4 w-4 text-stone-800" />
           <AlertDescription className="text-stone-950">
             <strong>Note:</strong> As a Project Manager, you have read-only access to pending requests and inventory. 
-            Only Admins can approve/reject material requests, and only Warehouse Staff can edit inventory levels.
+            Admins can approve requests and manage inventory or stock movements. Warehouse Staff can also manage inventory and IN/OUT transactions.
           </AlertDescription>
         </Alert>
       </div>

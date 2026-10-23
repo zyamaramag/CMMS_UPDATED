@@ -17,6 +17,16 @@ import MessagesPage from './pages/MessagesPage';
 import SecurityCenterPage from './pages/SecurityCenterPage';
 import Layout from './components/Layout';
 import RootProviders from './components/RootProviders';
+import { useAuth, UserRole } from './contexts/AuthContext';
+
+function RequireRole({ roles, children }: { roles: UserRole[]; children: React.ReactNode }) {
+  const { user, isAuthenticated } = useAuth();
+  if (!isAuthenticated || !user) return <Navigate to="/" replace />;
+  if (!roles.includes(user.role)) return <Navigate to="/dashboard" replace />;
+  return children;
+}
+
+const allRoles: UserRole[] = ['admin', 'staff', 'engineer', 'manager'];
 
 export const router = createBrowserRouter([
   {
@@ -44,51 +54,51 @@ export const router = createBrowserRouter([
   },
   {
     path: '/',
-    element: <Layout />,
+    element: <RequireRole roles={allRoles}><Layout /></RequireRole>,
     children: [
       {
         path: 'dashboard',
-        element: <DashboardPage />
+        element: <RequireRole roles={allRoles}><DashboardPage /></RequireRole>
       },
       {
         path: 'inventory',
-        element: <InventoryPage />
+        element: <RequireRole roles={allRoles}><InventoryPage /></RequireRole>
       },
       {
         path: 'requests',
-        element: <MaterialRequestPage />
+        element: <RequireRole roles={['admin', 'manager']}><MaterialRequestPage /></RequireRole>
       },
       {
         path: 'approvals',
-        element: <ApprovalPage />
+        element: <RequireRole roles={['admin']}><ApprovalPage /></RequireRole>
       },
       {
         path: 'user-approvals',
-        element: <UserApprovalsPage />
+        element: <RequireRole roles={['admin']}><UserApprovalsPage /></RequireRole>
       },
       {
         path: 'messages',
-        element: <MessagesPage />
+        element: <RequireRole roles={['engineer', 'manager']}><MessagesPage /></RequireRole>
       },
       {
         path: 'inout',
-        element: <InOutPage />
+        element: <RequireRole roles={['admin', 'staff', 'manager']}><InOutPage /></RequireRole>
       },
       {
         path: 'users',
-        element: <UsersPage />
+        element: <RequireRole roles={['admin']}><UsersPage /></RequireRole>
       },
       {
         path: 'logs',
-        element: <ActivityLogsPage />
+        element: <RequireRole roles={['admin', 'staff']}><ActivityLogsPage /></RequireRole>
       },
       {
         path: 'security',
-        element: <SecurityCenterPage />
+        element: <RequireRole roles={['admin']}><SecurityCenterPage /></RequireRole>
       },
       {
         path: 'settings',
-        element: <SettingsPage />
+        element: <RequireRole roles={allRoles}><SettingsPage /></RequireRole>
       }
     ]
   },

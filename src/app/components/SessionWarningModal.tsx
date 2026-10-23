@@ -2,10 +2,43 @@ import { useAuth } from '../contexts/AuthContext';
 import { Button } from './ui/button';
 import { Clock, LogOut, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router';
+import { useEffect, useRef } from 'react';
 
 export default function SessionWarningModal() {
   const { showSessionWarning, sessionWarningCountdown, resetSessionTimeout, logout } = useAuth();
   const navigate = useNavigate();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!showSessionWarning) return;
+    previousFocusRef.current = document.activeElement as HTMLElement;
+    const dialog = dialogRef.current;
+    const focusable = () => Array.from(
+      dialog?.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])') ?? []
+    ).filter(element => !element.hasAttribute('disabled'));
+    focusable()[0]?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const elements = focusable();
+      if (!elements.length) return;
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      previousFocusRef.current?.focus();
+    };
+  }, [showSessionWarning]);
 
   if (!showSessionWarning) return null;
 
@@ -26,7 +59,7 @@ export default function SessionWarningModal() {
       aria-describedby="session-warning-desc"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
     >
-      <div className="bg-white border border-stone-900 shadow-[4px_4px_0px_0px_#EAB308] w-full max-w-sm mx-4 overflow-hidden">
+      <div ref={dialogRef} className="bg-white border border-stone-900 shadow-[4px_4px_0px_0px_#EAB308] w-full max-w-sm mx-4 overflow-hidden">
         {/* Header */}
         <div className={`px-5 pt-5 pb-4 border-b border-stone-200 ${isUrgent ? 'bg-yellow-400' : 'bg-blue-950'}`}>
           <div className="flex items-center gap-3">
@@ -47,6 +80,8 @@ export default function SessionWarningModal() {
           </p>
 
           <div
+            aria-live={isUrgent ? 'assertive' : 'polite'}
+            aria-label={`${sessionWarningCountdown} seconds remaining`}
             className={`text-6xl font-black tabular-nums tracking-tight ${isUrgent ? 'text-yellow-600' : 'text-blue-950'}`}
             style={{ fontFamily: "'Barlow Condensed', sans-serif" }}
           >
@@ -56,6 +91,11 @@ export default function SessionWarningModal() {
           {/* Progress bar */}
           <div className="w-full bg-stone-200 h-1.5 border border-stone-300">
             <div
+              role="progressbar"
+              aria-label="Time remaining"
+              aria-valuemin={0}
+              aria-valuemax={120}
+              aria-valuenow={sessionWarningCountdown}
               className={`h-full transition-all duration-1000 ${isUrgent ? 'bg-yellow-500' : 'bg-blue-900'}`}
               style={{ width: `${pct}%` }}
             />

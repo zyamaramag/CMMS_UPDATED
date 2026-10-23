@@ -79,7 +79,7 @@ export default function SignUpPage() {
             <div className="mx-auto w-16 h-16 bg-white rounded-full flex items-center justify-center">
               <CheckCircle className="h-10 w-10 text-green-600" />
             </div>
-            <CardTitle className="text-2xl">Registration Submitted!</CardTitle>
+            <CardTitle role="heading" aria-level={1} className="text-2xl">Registration Submitted!</CardTitle>
             <CardDescription className="text-blue-200">
               Your account request is pending approval
             </CardDescription>
@@ -124,7 +124,7 @@ export default function SignUpPage() {
               <UserPlus className="h-6 w-6 text-blue-950" />
             </div>
             <div>
-              <CardTitle className="text-2xl">Create Account</CardTitle>
+              <CardTitle role="heading" aria-level={1} className="text-2xl">Create Account</CardTitle>
               <CardDescription className="text-blue-200">
                 HVL Engineering Services - Materials Management System
               </CardDescription>
