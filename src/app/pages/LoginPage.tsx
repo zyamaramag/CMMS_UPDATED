@@ -5,13 +5,14 @@ import { useAuth } from '../contexts/AuthContext';
 import { useData } from '../contexts/DataContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { AlertCircle, LogIn, UserPlus } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, LogIn, UserPlus } from 'lucide-react';
 import AuthStepIndicator from '../components/AuthStepIndicator';
 import { toast } from 'sonner';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { users } = useData();
@@ -111,15 +112,26 @@ export default function LoginPage() {
                 <label htmlFor="password" className="block text-xs font-black uppercase tracking-widest text-stone-700">
                   Password
                 </label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="Enter your password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  className="border-stone-900 bg-stone-50 focus-visible:ring-yellow-500"
-                />
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="Enter your password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    className="border-stone-900 bg-stone-50 pr-11 focus-visible:ring-yellow-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(current => !current)}
+                    className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-stone-600 hover:text-stone-950"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    aria-pressed={showPassword}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
 
               <Button

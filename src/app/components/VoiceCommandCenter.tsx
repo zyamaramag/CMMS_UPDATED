@@ -148,7 +148,7 @@ function getSpeechRecognition(): SpeechRecognitionConstructor | null {
 export default function VoiceCommandCenter() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { materials, requests, users } = useData();
+  const { materials, requests, users, addMessage, addRequest } = useData();
   const { announce } = useAccessibility();
   const [open, setOpen] = useState(false);
   const [command, setCommand] = useState('');
@@ -173,15 +173,22 @@ export default function VoiceCommandCenter() {
     ];
     if (user?.role === 'manager') {
       examples.push(
-        'Create a request for 50 bags of cement for Project A',
+        'Request 50 bags of cement for Project A',
+        'Create a request draft for 50 bags of cement for Project A',
         'Show my pending requests',
         'Edit request REQ001',
         'Cancel request REQ001'
       );
-      examples.push('Compose message to Field Engineer saying Please confirm the site requirements');
+      examples.push(
+        'Send message to Field Engineer saying Please confirm the site requirements',
+        'Compose message to Field Engineer saying Please confirm the site requirements'
+      );
     }
     if (user?.role === 'engineer') {
-      examples.push('Compose message to Project Manager about REQ001 saying Please review this request');
+      examples.push(
+        'Send message to Project Manager about REQ001 saying Please review this request',
+        'Compose message to Project Manager about REQ001 saying Please review this request'
+      );
     }
     if (user?.role === 'admin') {
       examples.push(
@@ -474,14 +481,17 @@ export default function VoiceCommandCenter() {
       return;
     }
 
-    const messageMatch = rawCommand.trim().match(/\b(?:compose|write|send) (?:a )?message to (.+)$/i);
+    const messageMatch = rawCommand.trim().match(
+      /\b(compose|write|draft|send|message|tell) (?:a )?(?:message )?(?:to )?(.+)$/i
+    );
     if (messageMatch) {
       if (user?.role !== 'engineer' && user?.role !== 'manager') {
         complete('Messaging is available only to Engineers and Project Managers.', 'error');
         return;
       }
 
-      const details = messageMatch[1].trim();
+      const action = messageMatch[1].toLowerCase();
+      const details = messageMatch[2].trim();
       const sayingIndex = details.toLowerCase().indexOf(' saying ');
       const beforeContent = sayingIndex >= 0 ? details.slice(0, sayingIndex).trim() : details;
       const content = sayingIndex >= 0 ? details.slice(sayingIndex + 8).trim() : '';
@@ -522,6 +532,33 @@ export default function VoiceCommandCenter() {
       const subject = spokenSubject ||
         (relatedRequest ? `Regarding ${relatedRequest.id}` : content.slice(0, 60)) ||
         'New message';
+
+      const shouldSendNow = ['send', 'message', 'tell'].includes(action);
+      if (shouldSendNow) {
+        if (!content) {
+          complete(
+            `Say what to send after “saying.” For example: “Send message to ${recipient.fullName} saying Delivery is ready.”`,
+            'error'
+          );
+          return;
+        }
+        addMessage({
+          senderId: user.id,
+          senderName: user.fullName,
+          senderRole: user.role,
+          recipientId: recipient.id,
+          recipientName: recipient.fullName,
+          recipientRole: recipient.role as 'engineer' | 'manager',
+          subject,
+          content,
+          timestamp: new Date().toISOString(),
+          read: false,
+          relatedRequestId: relatedRequest?.id,
+        });
+        complete(`Message sent to ${recipient.fullName}.`);
+        setOpen(false);
+        return;
+      }
 
       navigate('/messages', {
         state: {
@@ -566,14 +603,17 @@ export default function VoiceCommandCenter() {
       return;
     }
 
-    const requestMatch = normalized.match(/\bcreate (?:a )?(?:material )?request for (\d+)\s+(.+)/);
+    const requestMatch = normalized.match(
+      /\b(create|make|draft|submit|request|order|need) (?:a )?(?:material )?(?:request draft )?(?:request )?(?:for )?(\d+(?:\.\d+)?)\s+(.+)/
+    );
     if (requestMatch) {
       if (user?.role !== 'manager') {
         complete('Only Project Managers can create material requests.', 'error');
         return;
       }
-      const quantity = Number(requestMatch[1]);
-      const requestDetails = requestMatch[2];
+      const action = requestMatch[1];
+      const quantity = Number(requestMatch[2]);
+      const requestDetails = requestMatch[3];
       const purposeMatch = requestDetails.match(/\s+for\s+(.+)$/);
       const requestedName = requestDetails
         .replace(/\s+for\s+.+$/, '')
@@ -582,6 +622,33 @@ export default function VoiceCommandCenter() {
       const material = findMaterial(requestedName);
       if (!material) {
         complete(`No material matching “${requestedName}” was found. Try a material name or category from inventory.`, 'error');
+        return;
+      }
+      const shouldSubmitNow = ['submit', 'request', 'order', 'need'].includes(action);
+      if (shouldSubmitNow) {
+        if (!purposeMatch?.[1]?.trim()) {
+          complete(
+            'Include the project or purpose after “for.” For example: “Request 50 bags of cement for Project A.”',
+            'error'
+          );
+          return;
+        }
+        const neededDate = new Date();
+        neededDate.setDate(neededDate.getDate() + 7);
+        addRequest({
+          materialId: material.id,
+          materialName: material.name,
+          quantity,
+          unit: material.unit,
+          purpose: purposeMatch[1].trim(),
+          dateNeeded: neededDate.toISOString().slice(0, 10),
+          requestedBy: user.fullName,
+          requestedById: user.id,
+        });
+        complete(
+          `Request submitted for ${quantity} ${material.unit} of ${material.name} for ${purposeMatch[1].trim()}.`
+        );
+        setOpen(false);
         return;
       }
       navigate('/requests', {
