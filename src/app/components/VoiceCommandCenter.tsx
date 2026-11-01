@@ -272,7 +272,7 @@ export default function VoiceCommandCenter() {
       return;
     }
 
-    if (/\b(?:stop listening|stop voice|turn off voice)\b/.test(normalized)) {
+    if (/^(?:stop|stop listening|stop voice|turn off voice|turn off microphone|cancel listening)$/.test(normalized)) {
       listeningRef.current = false;
       setIsListening(false);
       recognitionRef.current?.stop();
