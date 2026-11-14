@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import React, { createContext, useCallback, useContext, useState, ReactNode, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 
 export type UserRole = 'admin' | 'staff' | 'engineer' | 'manager';
@@ -46,61 +46,78 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     return null;
   });
-  const [sessionTimeout, setSessionTimeout] = useState<NodeJS.Timeout | null>(null);
-  const [warningTimeout, setWarningTimeout] = useState<NodeJS.Timeout | null>(null);
   const [showSessionWarning, setShowSessionWarning] = useState(false);
   const [sessionWarningCountdown, setSessionWarningCountdown] = useState(120);
-  const countdownRef = React.useRef<NodeJS.Timeout | null>(null);
+  const sessionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sessionDeadlineRef = useRef(0);
+  const lastActivityResetRef = useRef(0);
 
-  const clearTimeouts = () => {
-    if (sessionTimeout) clearTimeout(sessionTimeout);
-    if (warningTimeout) clearTimeout(warningTimeout);
+  const clearTimeouts = useCallback(() => {
+    if (sessionTimeoutRef.current) clearTimeout(sessionTimeoutRef.current);
+    if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
     if (countdownRef.current) clearInterval(countdownRef.current);
-  };
+    sessionTimeoutRef.current = null;
+    warningTimeoutRef.current = null;
+    countdownRef.current = null;
+  }, []);
 
-  const resetSessionTimeout = () => {
+  const resetSessionTimeout = useCallback(() => {
     if (!user) return;
 
     clearTimeouts();
     setShowSessionWarning(false);
-    setSessionWarningCountdown(120);
+    setSessionWarningCountdown(WARNING_TIME / 1000);
+    sessionDeadlineRef.current = Date.now() + SESSION_TIMEOUT;
 
     // Set warning timeout — show modal instead of toast
-    const warning = setTimeout(() => {
+    warningTimeoutRef.current = setTimeout(() => {
       setShowSessionWarning(true);
-      setSessionWarningCountdown(120);
-      // Live countdown inside the modal
+      const updateCountdown = () => {
+        const remaining = Math.max(
+          0,
+          Math.ceil((sessionDeadlineRef.current - Date.now()) / 1000)
+        );
+        setSessionWarningCountdown(remaining);
+        if (remaining === 0 && countdownRef.current) {
+          clearInterval(countdownRef.current);
+          countdownRef.current = null;
+        }
+      };
+      updateCountdown();
       countdownRef.current = setInterval(() => {
-        setSessionWarningCountdown(prev => {
-          if (prev <= 1) {
-            if (countdownRef.current) clearInterval(countdownRef.current);
-            return 0;
-          }
-          return prev - 1;
-        });
+        updateCountdown();
       }, 1000);
     }, SESSION_TIMEOUT - WARNING_TIME);
-    setWarningTimeout(warning);
 
     // Set session timeout
-    const timeout = setTimeout(() => {
-      logout();
+    sessionTimeoutRef.current = setTimeout(() => {
+      clearTimeouts();
+      setShowSessionWarning(false);
+      setUser(null);
+      safeLocalStorage()?.removeItem('currentUser');
       toast.error('Session expired due to inactivity. Please log in again.');
       window.location.href = '/';
     }, SESSION_TIMEOUT);
-    setSessionTimeout(timeout);
-  };
+  }, [clearTimeouts, user]);
 
   useEffect(() => {
     if (user) {
       resetSessionTimeout();
 
-      // Reset timeout on user activity
-      const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
-      const handleActivity = () => resetSessionTimeout();
+      // Keep one timer set alive. Throttling high-frequency pointer/scroll
+      // events prevents unnecessary timer churn while still tracking activity.
+      const events = ['pointerdown', 'pointermove', 'keydown', 'scroll', 'touchstart', 'input'];
+      const handleActivity = () => {
+        const now = Date.now();
+        if (now - lastActivityResetRef.current < 1000) return;
+        lastActivityResetRef.current = now;
+        resetSessionTimeout();
+      };
 
       events.forEach(event => {
-        window.addEventListener(event, handleActivity);
+        window.addEventListener(event, handleActivity, { passive: true });
       });
 
       return () => {
@@ -110,7 +127,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
       };
     }
-  }, [user]);
+    clearTimeouts();
+  }, [clearTimeouts, resetSessionTimeout, user]);
 
   const login = async (username: string, password: string, twoFA?: string): Promise<boolean> => {
     // Accept user data as a simple object through username parameter if it's a stringified JSON
@@ -152,6 +170,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     clearTimeouts();
+    setShowSessionWarning(false);
     setUser(null);
     safeLocalStorage()?.removeItem('currentUser');
   };
