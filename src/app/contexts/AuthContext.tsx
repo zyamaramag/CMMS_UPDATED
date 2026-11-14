@@ -24,9 +24,9 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Session timeout: 15 minutes of inactivity
-const SESSION_TIMEOUT = 15 * 60 * 1000; // 15 minutes in milliseconds
-const WARNING_TIME = 2 * 60 * 1000; // Show warning 2 minutes before timeout
+// Session timeout: 10 minutes of inactivity
+const SESSION_TIMEOUT = 10 * 60 * 1000;
+const WARNING_TIME = 2 * 60 * 1000;
 
 function safeLocalStorage() {
   try {
