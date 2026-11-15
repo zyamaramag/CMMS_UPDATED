@@ -1,5 +1,5 @@
 import PageTransition from '../components/PageTransition';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 import { useData } from '../contexts/DataContext';
@@ -43,6 +43,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../components/ui/alert-dialog';
+import RequestProgress from '../components/RequestProgress';
+
+type RequestFormErrors = Partial<Record<'materialId' | 'quantity' | 'dateNeeded' | 'purpose', string>>;
 
 function defaultNeededDate() {
   const date = new Date();
@@ -70,6 +73,11 @@ export default function MaterialRequestPage() {
   const [editData, setEditData] = useState({ quantity: 0, purpose: '', dateNeeded: '' });
   const [requestSearch, setRequestSearch] = useState(() => searchParams.get('q') ?? '');
   const [requestStatus, setRequestStatus] = useState(() => searchParams.get('status') ?? 'all');
+  const [formErrors, setFormErrors] = useState<RequestFormErrors>({});
+  const materialTriggerRef = useRef<HTMLButtonElement>(null);
+  const quantityRef = useRef<HTMLInputElement>(null);
+  const dateRef = useRef<HTMLInputElement>(null);
+  const purposeRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     const voiceState = location.state as {
@@ -135,16 +143,35 @@ export default function MaterialRequestPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const material = materials.find(m => m.id === formData.materialId);
-    if (!material || !user) {
-      announce('Request could not be submitted. Select a valid material and sign in again.', 'assertive');
+    const today = new Date().toISOString().slice(0, 10);
+    const errors: RequestFormErrors = {};
+    if (!material) errors.materialId = 'Please select a material from inventory.';
+    if (!Number.isFinite(formData.quantity) || formData.quantity <= 0) {
+      errors.quantity = 'Please enter a quantity greater than zero.';
+    }
+    if (!formData.dateNeeded) errors.dateNeeded = 'Please choose the date the material is needed.';
+    else if (formData.dateNeeded < today) errors.dateNeeded = 'Please choose today or a future date.';
+    if (!formData.purpose.trim()) {
+      errors.purpose = 'Please describe the project or work that needs these materials.';
+    }
+    setFormErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      const firstError = (['materialId', 'quantity', 'dateNeeded', 'purpose'] as const).find(key => errors[key]);
+      const controls = {
+        materialId: materialTriggerRef,
+        quantity: quantityRef,
+        dateNeeded: dateRef,
+        purpose: purposeRef,
+      };
+      controls[firstError!].current?.focus();
+      announce(
+        `Request form has ${Object.keys(errors).length} error${Object.keys(errors).length === 1 ? '' : 's'}. ${errors[firstError!]}`,
+        'assertive'
+      );
       return;
     }
-    if (formData.quantity <= 0) {
-      announce('Quantity must be greater than zero.', 'assertive');
-      return;
-    }
-    if (formData.dateNeeded < new Date().toISOString().slice(0, 10)) {
-      announce('Date needed cannot be in the past.', 'assertive');
+    if (!user || !material) {
+      announce('Request could not be submitted. Please sign in again.', 'assertive');
       return;
     }
 
@@ -167,6 +194,7 @@ export default function MaterialRequestPage() {
       purpose: '',
       dateNeeded: defaultNeededDate()
     });
+    setFormErrors({});
   };
 
   const getStatusIcon = (status: string) => {
@@ -268,16 +296,26 @@ export default function MaterialRequestPage() {
             <CardDescription className="text-stone-400">Request materials needed for your project</CardDescription>
           </CardHeader>
           <CardContent className="pt-6">
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+              <p className="text-sm text-stone-600">
+                Select an inventory item, enter the amount and project purpose, then review the summary before submitting.
+              </p>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label id="request-material-label">Material</Label>
                   <Select
                     value={formData.materialId}
-                    onValueChange={(value) => setFormData({ ...formData, materialId: value })}
-                    required
+                    onValueChange={(value) => {
+                      setFormData({ ...formData, materialId: value });
+                      setFormErrors(current => ({ ...current, materialId: undefined }));
+                    }}
                   >
-                    <SelectTrigger aria-labelledby="request-material-label">
+                    <SelectTrigger
+                      ref={materialTriggerRef}
+                      aria-labelledby="request-material-label"
+                      aria-describedby={formErrors.materialId ? 'request-material-error' : undefined}
+                      aria-invalid={Boolean(formErrors.materialId)}
+                    >
                       <SelectValue placeholder="Select material" />
                     </SelectTrigger>
                     <SelectContent>
@@ -288,44 +326,85 @@ export default function MaterialRequestPage() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {formErrors.materialId && (
+                    <p id="request-material-error" className="text-sm font-medium text-red-700">
+                      {formErrors.materialId}
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="request-quantity">Quantity Needed</Label>
                   <Input
+                    ref={quantityRef}
                     id="request-quantity"
                     type="number"
                     value={formData.quantity || ''}
-                    onChange={(e) => setFormData({ ...formData, quantity: Number(e.target.value) })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, quantity: Number(e.target.value) });
+                      setFormErrors(current => ({ ...current, quantity: undefined }));
+                    }}
                     placeholder="Enter quantity"
-                    required
                     min={1}
+                    aria-invalid={Boolean(formErrors.quantity)}
+                    aria-describedby={formErrors.quantity ? 'request-quantity-help request-quantity-error' : 'request-quantity-help'}
                   />
+                  <p id="request-quantity-help" className="text-xs text-stone-600">
+                    Enter the total number of {selectedMaterial?.unit ?? 'units'} needed.
+                  </p>
+                  {formErrors.quantity && (
+                    <p id="request-quantity-error" className="text-sm font-medium text-red-700">
+                      {formErrors.quantity}
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="request-date">Date Needed</Label>
                   <Input
+                    ref={dateRef}
                     id="request-date"
                     type="date"
                     min={new Date().toISOString().slice(0, 10)}
                     value={formData.dateNeeded}
-                    onChange={(e) => setFormData({ ...formData, dateNeeded: e.target.value })}
-                    required
+                    onChange={(e) => {
+                      setFormData({ ...formData, dateNeeded: e.target.value });
+                      setFormErrors(current => ({ ...current, dateNeeded: undefined }));
+                    }}
+                    aria-invalid={Boolean(formErrors.dateNeeded)}
+                    aria-describedby={formErrors.dateNeeded ? 'request-date-error' : undefined}
                   />
+                  {formErrors.dateNeeded && (
+                    <p id="request-date-error" className="text-sm font-medium text-red-700">
+                      {formErrors.dateNeeded}
+                    </p>
+                  )}
                 </div>
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="request-purpose">Purpose / Project Details</Label>
                 <Textarea
+                  ref={purposeRef}
                   id="request-purpose"
                   value={formData.purpose}
-                  onChange={(e) => setFormData({ ...formData, purpose: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, purpose: e.target.value });
+                    setFormErrors(current => ({ ...current, purpose: undefined }));
+                  }}
                   placeholder="Describe what the materials will be used for..."
                   rows={3}
-                  required
+                  aria-invalid={Boolean(formErrors.purpose)}
+                  aria-describedby={formErrors.purpose ? 'request-purpose-help request-purpose-error' : 'request-purpose-help'}
                 />
+                <p id="request-purpose-help" className="text-xs text-stone-600">
+                  Include the project or site and the work these materials support.
+                </p>
+                {formErrors.purpose && (
+                  <p id="request-purpose-error" className="text-sm font-medium text-red-700">
+                    {formErrors.purpose}
+                  </p>
+                )}
               </div>
 
               {selectedMaterial && formData.quantity > 0 && formData.purpose.trim() && formData.dateNeeded && (
@@ -342,7 +421,6 @@ export default function MaterialRequestPage() {
               <Button
                 type="submit"
                 className="w-full bg-yellow-500 hover:bg-yellow-600 text-stone-950"
-                disabled={!formData.materialId || !formData.quantity || !formData.purpose || !formData.dateNeeded}
               >
                 <Send className="h-4 w-4 mr-2" />
                 Submit Request
@@ -420,6 +498,7 @@ export default function MaterialRequestPage() {
                       <dd className="mt-0.5 break-words text-sm text-stone-800">{request.purpose}</dd>
                     </div>
                   </dl>
+                  <RequestProgress request={request} className="mt-4 border-t border-stone-200 pt-3" />
 
                   {(request.rejectionReason || request.reviewedBy || request.status === 'cancelled' || request.status === 'issued') && (
                     <div className="mt-3 border-l-4 border-amber-500 bg-stone-50 p-3 text-sm">
@@ -474,68 +553,76 @@ export default function MaterialRequestPage() {
             )}
           </div>
 
-          <div className="hidden rounded-md border overflow-x-auto xl:block">
-            <Table aria-label={canSubmit ? 'My material requests' : 'All material requests'}>
+          <div className="hidden overflow-hidden rounded-md border border-stone-300 xl:block">
+            <Table
+              className="w-full table-fixed"
+              aria-label={canSubmit ? 'My material requests' : 'All material requests'}
+            >
               <TableCaption className="sr-only">
                 Material requests with quantities, requester, required date, status, and review notes.
               </TableCaption>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Request ID</TableHead>
-                  <TableHead>Material</TableHead>
-                  <TableHead>Quantity</TableHead>
-                  <TableHead>Purpose</TableHead>
-                  <TableHead>Date Needed</TableHead>
-                  <TableHead>Requested By</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Notes</TableHead>
-                  {canSubmit && <TableHead className="text-right">Actions</TableHead>}
+                  <TableHead className="w-[14%]">Request</TableHead>
+                  <TableHead className="w-[16%]">Material</TableHead>
+                  <TableHead className="w-[14%]">Schedule</TableHead>
+                  <TableHead className={canSubmit ? 'w-[18%]' : 'w-[22%]'}>Purpose</TableHead>
+                  <TableHead className={canSubmit ? 'w-[26%]' : 'w-[34%]'}>Progress</TableHead>
+                  {canSubmit && <TableHead className="w-[12%] text-right">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredRequests.length > 0 ? filteredRequests.map((request) => (
                   <TableRow key={request.id}>
-                    <TableCell className="font-medium">{request.id}</TableCell>
-                    <TableCell>{request.materialName}</TableCell>
-                    <TableCell>
-                      {request.quantity} {request.unit}
+                    <TableCell className="align-top">
+                      <div className="font-mono text-xs font-bold text-stone-900">{request.id}</div>
+                      <div className="mt-1 break-words text-xs text-stone-600">{request.requestedBy}</div>
                     </TableCell>
-                    <TableCell className="max-w-xs">
-                      <span className="text-sm text-stone-700 line-clamp-2">{request.purpose}</span>
-                    </TableCell>
-                    <TableCell>{new Date(request.dateNeeded).toLocaleDateString()}</TableCell>
-                    <TableCell>{request.requestedBy}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {getStatusIcon(request.status)}
-                        {getStatusBadge(request.status)}
+                    <TableCell className="align-top">
+                      <div className="break-words font-semibold text-stone-900">{request.materialName}</div>
+                      <div className="mt-1 text-xs text-stone-600">
+                        {request.quantity} {request.unit}
                       </div>
                     </TableCell>
-                    <TableCell>
-                      {request.status === 'rejected' && request.rejectionReason && (
-                        <div className="text-xs text-red-600 max-w-xs">
+                    <TableCell className="align-top">
+                      <div className="text-xs font-bold uppercase tracking-wide text-stone-500">Needed by</div>
+                      <div className="mt-1 text-sm text-stone-800">
+                        {new Date(request.dateNeeded).toLocaleDateString()}
+                      </div>
+                    </TableCell>
+                    <TableCell className="align-top">
+                      <p className="break-words text-sm leading-relaxed text-stone-700">{request.purpose}</p>
+                    </TableCell>
+                    <TableCell className="align-top">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          {getStatusIcon(request.status)}
+                          {getStatusBadge(request.status)}
+                        </div>
+                        <RequestProgress request={request} className="mt-3" />
+                        {request.status === 'rejected' && request.rejectionReason && (
+                          <div className="mt-2 break-words border-l-2 border-red-600 pl-2 text-xs text-red-700">
                           <strong>Rejection reason:</strong> {request.rejectionReason}
-                        </div>
-                      )}
-                      {request.status === 'approved' && request.reviewedBy && (
-                        <div className="text-xs text-green-600">
-                          Approved by {request.reviewedBy}
-                        </div>
-                      )}
-                      {request.status === 'cancelled' && (
-                        <div className="text-xs text-stone-600">Cancelled by requester</div>
-                      )}
-                      {request.status === 'issued' && (
-                        <div className="text-xs text-blue-800">
-                          Issued by {request.issuedBy}
-                          {request.issueDate ? ` on ${new Date(request.issueDate).toLocaleDateString()}` : ''}
-                        </div>
-                      )}
+                          </div>
+                        )}
+                        {request.status === 'approved' && request.reviewedBy && (
+                          <div className="mt-2 text-xs text-green-700">Approved by {request.reviewedBy}</div>
+                        )}
+                        {request.status === 'cancelled' && (
+                          <div className="mt-2 text-xs text-stone-600">Cancelled by requester</div>
+                        )}
+                        {request.status === 'issued' && (
+                          <div className="mt-2 text-xs text-blue-800">
+                            Issued by {request.issuedBy}
+                            {request.issueDate ? ` on ${new Date(request.issueDate).toLocaleDateString()}` : ''}
+                          </div>
+                        )}
+                      </div>
                     </TableCell>
                     {canSubmit && (
-                      <TableCell className="text-right">
+                      <TableCell className="align-top text-right">
                         {request.status === 'pending' && (
-                          <div className="flex justify-end gap-1">
+                          <div className="flex flex-col items-stretch gap-1">
                             <Button
                               variant="ghost"
                               size="sm"
@@ -573,7 +660,7 @@ export default function MaterialRequestPage() {
                   </TableRow>
                 )) : (
                   <TableRow>
-                    <TableCell colSpan={canSubmit ? 9 : 8} className="py-8 text-center text-stone-600">
+                    <TableCell colSpan={canSubmit ? 6 : 5} className="py-8 text-center text-stone-600">
                       No material requests match the current filters.
                     </TableCell>
                   </TableRow>

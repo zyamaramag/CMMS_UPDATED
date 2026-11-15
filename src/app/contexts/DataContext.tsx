@@ -59,8 +59,8 @@ interface DataContextType {
     updates: Pick<MaterialRequest, 'quantity' | 'purpose' | 'dateNeeded'>
   ) => boolean;
   cancelPendingRequest: (id: string, requestedById: string, cancelledBy: string) => boolean;
-  approveRequest: (id: string, reviewedBy: string) => void;
-  rejectRequest: (id: string, reviewedBy: string, reason: string) => void;
+  approveRequest: (id: string, reviewedBy: string) => boolean;
+  rejectRequest: (id: string, reviewedBy: string, reason: string) => boolean;
 
   // Users
   users: SystemUser[];
@@ -310,6 +310,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const approveRequest = (id: string, reviewedBy: string) => {
+    const request = requests.find(r => r.id === id);
+    if (!request || request.status !== 'pending') return false;
     setRequests(requests.map(r =>
       r.id === id
         ? {
@@ -321,20 +323,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
         : r
     ));
 
-    const request = requests.find(r => r.id === id);
-    if (request) {
-      addActivityLog({
-        userId: '1',
-        username: reviewedBy,
-        role: 'admin',
-        action: 'Request Approved',
-        timestamp: new Date().toISOString(),
-        details: `Approved request ${id} for ${request.quantity} ${request.unit} of ${request.materialName}`
-      });
-    }
+    addActivityLog({
+      userId: '1',
+      username: reviewedBy,
+      role: 'admin',
+      action: 'Request Approved',
+      timestamp: new Date().toISOString(),
+      details: `Approved request ${id} for ${request.quantity} ${request.unit} of ${request.materialName}`
+    });
+    return true;
   };
 
   const rejectRequest = (id: string, reviewedBy: string, reason: string) => {
+    const request = requests.find(r => r.id === id);
+    if (!request || request.status !== 'pending' || !reason.trim()) return false;
     setRequests(requests.map(r =>
       r.id === id
         ? {
@@ -342,22 +344,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
             status: 'rejected' as const,
             reviewedBy,
             reviewDate: new Date().toISOString(),
-            rejectionReason: reason
+            rejectionReason: reason.trim()
           }
         : r
     ));
 
-    const request = requests.find(r => r.id === id);
-    if (request) {
-      addActivityLog({
-        userId: '1',
-        username: reviewedBy,
-        role: 'admin',
-        action: 'Request Rejected',
-        timestamp: new Date().toISOString(),
-        details: `Rejected request ${id} - Reason: ${reason}`
-      });
-    }
+    addActivityLog({
+      userId: '1',
+      username: reviewedBy,
+      role: 'admin',
+      action: 'Request Rejected',
+      timestamp: new Date().toISOString(),
+      details: `Rejected request ${id} - Reason: ${reason.trim()}`
+    });
+    return true;
   };
 
   // Users functions
@@ -564,8 +564,8 @@ const defaultDataContext: DataContextType = {
   addRequest: () => {},
   updatePendingRequest: () => false,
   cancelPendingRequest: () => false,
-  approveRequest: () => {},
-  rejectRequest: () => {},
+  approveRequest: () => false,
+  rejectRequest: () => false,
   users: [],
   addUser: () => {},
   updateUser: () => {},

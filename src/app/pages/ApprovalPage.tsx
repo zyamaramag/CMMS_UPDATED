@@ -1,5 +1,5 @@
 import PageTransition from '../components/PageTransition';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 import { useData } from '../contexts/DataContext';
@@ -32,6 +32,7 @@ import { toast } from 'sonner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import RequestApprovalReceipt from '../components/RequestApprovalReceipt';
 import { useAccessibility } from '../contexts/AccessibilityContext';
+import RequestProgress from '../components/RequestProgress';
 
 export default function ApprovalPage() {
   const { user } = useAuth();
@@ -45,6 +46,8 @@ export default function ApprovalPage() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [approvedRequest, setApprovedRequest] = useState<MaterialRequest | null>(null);
   const [isReceiptOpen, setIsReceiptOpen] = useState(false);
+  const [rejectionError, setRejectionError] = useState('');
+  const rejectionReasonRef = useRef<HTMLTextAreaElement>(null);
 
   const isAdmin = user?.role === 'admin';
 
@@ -93,7 +96,15 @@ export default function ApprovalPage() {
   const handleApprove = () => {
     if (!selectedRequest || !user) return;
 
-    approveRequest(selectedRequest.id, user.fullName);
+    const approved = approveRequest(selectedRequest.id, user.fullName);
+    if (!approved) {
+      const message = `Request ${selectedRequest.id} is no longer pending and could not be approved.`;
+      toast.error(message);
+      announce(message, 'assertive');
+      setIsApproveDialogOpen(false);
+      setSelectedRequest(null);
+      return;
+    }
     toast.success(`Request ${selectedRequest.id} approved successfully`);
     announce(`Request ${selectedRequest.id} approved successfully.`);
     setIsApproveDialogOpen(false);
@@ -111,9 +122,24 @@ export default function ApprovalPage() {
   };
 
   const handleReject = () => {
-    if (!selectedRequest || !user || !rejectionReason.trim()) return;
+    if (!selectedRequest || !user) return;
+    if (!rejectionReason.trim()) {
+      const message = 'Please explain why this request is being rejected.';
+      setRejectionError(message);
+      rejectionReasonRef.current?.focus();
+      announce(message, 'assertive');
+      return;
+    }
 
-    rejectRequest(selectedRequest.id, user.fullName, rejectionReason);
+    const rejected = rejectRequest(selectedRequest.id, user.fullName, rejectionReason);
+    if (!rejected) {
+      const message = `Request ${selectedRequest.id} is no longer pending and could not be rejected.`;
+      toast.error(message);
+      announce(message, 'assertive');
+      setIsRejectDialogOpen(false);
+      setSelectedRequest(null);
+      return;
+    }
     toast.error(`Request ${selectedRequest.id} rejected`);
     announce(`Request ${selectedRequest.id} rejected.`);
     setIsRejectDialogOpen(false);
@@ -130,6 +156,7 @@ export default function ApprovalPage() {
     setIsReceiptOpen(true);
     setSelectedRequest(null);
     setRejectionReason('');
+    setRejectionError('');
   };
 
   const openApproveDialog = (request: MaterialRequest) => {
@@ -286,7 +313,16 @@ export default function ApprovalPage() {
       </Dialog>
 
       {/* Reject Dialog */}
-      <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
+      <Dialog
+        open={isRejectDialogOpen}
+        onOpenChange={open => {
+          setIsRejectDialogOpen(open);
+          if (!open) {
+            setRejectionError('');
+            setRejectionReason('');
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Reject Material Request</DialogTitle>
@@ -312,12 +348,26 @@ export default function ApprovalPage() {
             <div className="space-y-2">
               <Label htmlFor="rejection-reason">Rejection Reason</Label>
               <Textarea
+                ref={rejectionReasonRef}
                 id="rejection-reason"
                 value={rejectionReason}
-                onChange={(e) => setRejectionReason(e.target.value)}
+                onChange={(e) => {
+                  setRejectionReason(e.target.value);
+                  setRejectionError('');
+                }}
                 placeholder="Explain why this request is being rejected..."
                 rows={4}
+                aria-invalid={Boolean(rejectionError)}
+                aria-describedby={rejectionError ? 'rejection-reason-help rejection-reason-error' : 'rejection-reason-help'}
               />
+              <p id="rejection-reason-help" className="text-xs text-stone-600">
+                Give the requester a specific reason and, where possible, the correction needed.
+              </p>
+              {rejectionError && (
+                <p id="rejection-reason-error" className="text-sm font-medium text-red-700">
+                  {rejectionError}
+                </p>
+              )}
             </div>
           </div>
           <DialogFooter>
@@ -325,7 +375,6 @@ export default function ApprovalPage() {
             <Button
               variant="destructive"
               onClick={handleReject}
-              disabled={!rejectionReason.trim()}
             >
               <XCircle className="h-4 w-4 mr-2" />
               Reject Request
@@ -412,6 +461,7 @@ function RequestTable({
                   <dd className="mt-0.5 break-words text-sm text-stone-800">{request.purpose}</dd>
                 </div>
               </dl>
+              <RequestProgress request={request} className="mt-4 border-t border-stone-200 pt-3" />
               {showActions && (
                 <div className="mt-4 grid grid-cols-2 gap-2 border-t border-stone-200 pt-3">
                   <Button
@@ -441,42 +491,51 @@ function RequestTable({
         )}
       </div>
 
-      <div className="hidden rounded-md border overflow-x-auto xl:block">
-      <Table aria-label={showActions ? 'Pending material requests' : 'Processed material requests'}>
+      <div className="hidden overflow-hidden rounded-md border border-stone-300 xl:block">
+      <Table
+        className="w-full table-fixed"
+        aria-label={showActions ? 'Pending material requests' : 'Processed material requests'}
+      >
         <TableCaption className="sr-only">
           Material request details including quantity, requester, required date, purpose, status, and available actions.
         </TableCaption>
         <TableHeader>
           <TableRow>
-            <TableHead>Request ID</TableHead>
-            <TableHead>Material</TableHead>
-            <TableHead>Quantity</TableHead>
-            <TableHead>Requested By</TableHead>
-            <TableHead>Date Needed</TableHead>
-            <TableHead>Purpose</TableHead>
-            <TableHead>Status</TableHead>
-            {showActions && <TableHead className="text-right">Actions</TableHead>}
+            <TableHead className="w-[18%]">Request</TableHead>
+            <TableHead className="w-[20%]">Request Details</TableHead>
+            <TableHead className={showActions ? 'w-[22%]' : 'w-[28%]'}>Purpose</TableHead>
+            <TableHead className={showActions ? 'w-[26%]' : 'w-[34%]'}>Progress</TableHead>
+            {showActions && <TableHead className="w-[14%] text-right">Actions</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
           {requests.map((request) => (
             <TableRow key={request.id}>
-              <TableCell className="font-medium">{request.id}</TableCell>
-              <TableCell>{request.materialName}</TableCell>
-              <TableCell>
-                {request.quantity} {request.unit}
+              <TableCell className="align-top">
+                <div className="font-mono text-xs font-bold text-stone-900">{request.id}</div>
+                <div className="mt-1 break-words font-semibold text-stone-900">{request.materialName}</div>
               </TableCell>
-              <TableCell>{request.requestedBy}</TableCell>
-              <TableCell>{new Date(request.dateNeeded).toLocaleDateString()}</TableCell>
-              <TableCell className="max-w-xs">
-                <span className="text-sm text-stone-700 line-clamp-2">{request.purpose}</span>
+              <TableCell className="align-top">
+                <div className="font-semibold text-stone-900">
+                  {request.quantity} {request.unit}
+                </div>
+                <div className="mt-1 break-words text-xs text-stone-600">{request.requestedBy}</div>
+                <div className="mt-2 text-xs text-stone-600">
+                  Needed {new Date(request.dateNeeded).toLocaleDateString()}
+                </div>
               </TableCell>
-              <TableCell>
-                {renderStatus(request)}
+              <TableCell className="align-top">
+                <p className="break-words text-sm leading-relaxed text-stone-700">{request.purpose}</p>
+              </TableCell>
+              <TableCell className="align-top">
+                <div>
+                  {renderStatus(request)}
+                  <RequestProgress request={request} className="mt-3" />
+                </div>
               </TableCell>
               {showActions && (
-                <TableCell className="text-right">
-                  <div className="flex justify-end gap-2">
+                <TableCell className="align-top text-right">
+                  <div className="flex flex-col items-stretch gap-1">
                     <Button
                       variant="ghost"
                       size="sm"

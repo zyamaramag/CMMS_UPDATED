@@ -159,6 +159,7 @@ export default function VoiceCommandCenter() {
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const listeningRef = useRef(false);
   const commandRunnerRef = useRef<(value: string) => void>(() => {});
+  const lastVoiceExecutionRef = useRef({ transcript: '', timestamp: 0 });
   const speechSupported = useMemo(() => getSpeechRecognition() !== null, []);
   const availableNavigationCommands = useMemo(
     () => NAVIGATION_COMMANDS.filter(item => user && item.roles.includes(user.role)),
@@ -614,6 +615,10 @@ export default function VoiceCommandCenter() {
       const action = requestMatch[1];
       const quantity = Number(requestMatch[2]);
       const requestDetails = requestMatch[3];
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        complete('Request quantity must be greater than zero.', 'error');
+        return;
+      }
       const purposeMatch = requestDetails.match(/\s+for\s+(.+)$/);
       const requestedName = requestDetails
         .replace(/\s+for\s+.+$/, '')
@@ -844,6 +849,14 @@ export default function VoiceCommandCenter() {
         if (result?.isFinal === false) continue;
         const transcript = result?.[0]?.transcript?.trim() ?? '';
         if (!transcript) continue;
+        const now = Date.now();
+        if (
+          lastVoiceExecutionRef.current.transcript.toLowerCase() === transcript.toLowerCase() &&
+          now - lastVoiceExecutionRef.current.timestamp < 2000
+        ) {
+          continue;
+        }
+        lastVoiceExecutionRef.current = { transcript, timestamp: now };
         setCommand(transcript);
         commandRunnerRef.current(transcript);
       }
